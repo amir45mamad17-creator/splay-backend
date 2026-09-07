@@ -18,9 +18,11 @@ const db = mysql.createPool({
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
+
     ssl: {
-        rejectUnauthorized: true
+        rejectUnauthorized: false
     },
+
     waitForConnections: true,
     connectionLimit: 5,
     queueLimit: 0
@@ -122,7 +124,7 @@ app.get("/health", async (req, res) => {
 });
 
 // ==============================
-// Test Database
+// Database Test
 // ==============================
 
 app.get("/api/database-test", async (req, res) => {
@@ -140,8 +142,7 @@ app.get("/api/database-test", async (req, res) => {
 
         res.status(500).json({
             success: false,
-            message: "MySQL connection failed",
-            error: error.message
+            message: "MySQL connection failed"
         });
     }
 });

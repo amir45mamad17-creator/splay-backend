@@ -9,9 +9,9 @@ app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 3000;
 
-// ============================================================
-// DATABASE
-// ============================================================
+/* =========================================================
+   DATABASE
+========================================================= */
 
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
@@ -20,56 +20,56 @@ const pool = mysql.createPool({
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME || "defaultdb",
 
-    ssl: {
-        rejectUnauthorized: false
-    },
-
     waitForConnections: true,
     connectionLimit: 5,
-    queueLimit: 0
+    queueLimit: 0,
+
+    ssl: {
+        rejectUnauthorized: false
+    }
 });
 
-// ============================================================
-// PREMIUM PLANS
-// ============================================================
+/* =========================================================
+   PREMIUM PLANS
+========================================================= */
 
 const PREMIUM_PLANS = {
     monthly: {
         id: "monthly",
-        title: "یک ماهه",
+        title: "ماهانه",
         days: 30,
-        toman: 199000,
-        rial: 1990000
+        amountToman: 199000,
+        amountRial: 1990000
     },
 
-    three_months: {
-        id: "three_months",
+    three_month: {
+        id: "three_month",
         title: "سه ماهه",
         days: 90,
-        toman: 499000,
-        rial: 4990000
+        amountToman: 499000,
+        amountRial: 4990000
     },
 
-    six_months: {
-        id: "six_months",
+    six_month: {
+        id: "six_month",
         title: "شش ماهه",
         days: 180,
-        toman: 799000,
-        rial: 7990000
+        amountToman: 799000,
+        amountRial: 7990000
     },
 
     yearly: {
         id: "yearly",
         title: "یک ساله",
         days: 365,
-        toman: 1299000,
-        rial: 12990000
+        amountToman: 1299000,
+        amountRial: 12990000
     }
 };
 
-// ============================================================
-// HELPERS
-// ============================================================
+/* =========================================================
+   HELPERS
+========================================================= */
 
 function hashPassword(password) {
     return crypto
@@ -81,7 +81,9 @@ function hashPassword(password) {
 function generateOrderId() {
     return (
         Date.now().toString() +
-        Math.floor(1000 + Math.random() * 9000).toString()
+        Math.floor(Math.random() * 1000)
+            .toString()
+            .padStart(3, "0")
     );
 }
 
@@ -95,10 +97,10 @@ async function columnExists(tableName, columnName) {
     const [rows] = await pool.query(
         `
         SELECT COUNT(*) AS count
-        FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME = ?
-        AND COLUMN_NAME = ?
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND column_name = ?
         `,
         [tableName, columnName]
     );
@@ -110,10 +112,10 @@ async function indexExists(tableName, indexName) {
     const [rows] = await pool.query(
         `
         SELECT COUNT(*) AS count
-        FROM INFORMATION_SCHEMA.STATISTICS
-        WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME = ?
-        AND INDEX_NAME = ?
+        FROM information_schema.statistics
+        WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND index_name = ?
         `,
         [tableName, indexName]
     );
@@ -121,44 +123,51 @@ async function indexExists(tableName, indexName) {
     return Number(rows[0].count) > 0;
 }
 
-async function addColumnIfMissing(tableName, columnName, definition) {
+async function addColumnIfMissing(
+    tableName,
+    columnName,
+    definition
+) {
     const exists = await columnExists(tableName, columnName);
 
     if (!exists) {
-        console.log(`Adding missing column ${tableName}.${columnName}`);
-
         await pool.query(
-            `ALTER TABLE \`${tableName}\` ADD COLUMN \`${columnName}\` ${definition}`
+            `ALTER TABLE \`${tableName}\`
+             ADD COLUMN \`${columnName}\` ${definition}`
+        );
+
+        console.log(
+            `Added missing column ${tableName}.${columnName}`
         );
     }
 }
 
-// ============================================================
-// DATABASE INITIALIZATION + MIGRATION
-// ============================================================
+/* =========================================================
+   DATABASE INITIALIZATION / MIGRATION
+========================================================= */
 
 async function initializeDatabase() {
     console.log("Initializing database...");
 
-    // --------------------------------------------------------
-    // USERS
-    // --------------------------------------------------------
-
+    /*
+     * USERS
+     */
     await pool.query(`
         CREATE TABLE IF NOT EXISTS users (
-            id INT AUTO_INCREMENT PRIMARY KEY,
+            id INT NOT NULL AUTO_INCREMENT,
             username VARCHAR(100) NOT NULL,
             email VARCHAR(255) NULL,
             password_hash VARCHAR(255) NULL,
             premium_expires_at DATETIME NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                ON UPDATE CURRENT_TIMESTAMP
+            created_at DATETIME NULL,
+            updated_at DATETIME NULL,
+            PRIMARY KEY (id)
         )
     `);
 
-    // Add missing columns from old versions of the table.
-
+    /*
+     * Add missing columns to old users table
+     */
     await addColumnIfMissing(
         "users",
         "username",
@@ -195,31 +204,85 @@ async function initializeDatabase() {
         "DATETIME NULL"
     );
 
-    // --------------------------------------------------------
-    // ORDERS
-    // --------------------------------------------------------
+    /*
+     * Try to make email unique.
+     * If an old duplicate schema prevents this,
+     * registration still continues.
+     */
+    try {
+        const emailIndexExists = await indexExists(
+            "users",
+            "unique_email"
+        );
 
+        if (!emailIndexExists) {
+            await pool.query(`
+                ALTER TABLE users
+                ADD UNIQUE KEY unique_email (email)
+            `);
+
+            console.log("Unique email index created.");
+        }
+    } catch (error) {
+        console.log(
+            "Email unique index was not created:",
+            error.message
+        );
+    }
+
+    /*
+     * ORDERS
+     */
     await pool.query(`
         CREATE TABLE IF NOT EXISTS orders (
-            id INT AUTO_INCREMENT PRIMARY KEY,
+            id INT NOT NULL AUTO_INCREMENT,
             order_id VARCHAR(100) NOT NULL,
             user_id INT NOT NULL,
             plan_id VARCHAR(50) NOT NULL,
             amount INT NOT NULL,
-            status VARCHAR(30) DEFAULT 'PENDING',
-
+            status VARCHAR(30) NOT NULL DEFAULT 'CREATED',
             ref_id VARCHAR(255) NULL,
             sale_order_id VARCHAR(255) NULL,
             sale_reference_id VARCHAR(255) NULL,
             response_code VARCHAR(50) NULL,
-
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             paid_at DATETIME NULL,
             premium_expires_at DATETIME NULL,
-
+            created_at DATETIME NULL,
+            updated_at DATETIME NULL,
+            PRIMARY KEY (id),
             UNIQUE KEY unique_order_id (order_id)
         )
     `);
+
+    await addColumnIfMissing(
+        "orders",
+        "order_id",
+        "VARCHAR(100) NULL"
+    );
+
+    await addColumnIfMissing(
+        "orders",
+        "user_id",
+        "INT NULL"
+    );
+
+    await addColumnIfMissing(
+        "orders",
+        "plan_id",
+        "VARCHAR(50) NULL"
+    );
+
+    await addColumnIfMissing(
+        "orders",
+        "amount",
+        "INT NULL"
+    );
+
+    await addColumnIfMissing(
+        "orders",
+        "status",
+        "VARCHAR(30) NULL DEFAULT 'CREATED'"
+    );
 
     await addColumnIfMissing(
         "orders",
@@ -257,41 +320,24 @@ async function initializeDatabase() {
         "DATETIME NULL"
     );
 
-    // --------------------------------------------------------
-    // UNIQUE EMAIL INDEX
-    // --------------------------------------------------------
-
-    const emailIndexExists = await indexExists(
-        "users",
-        "unique_email"
+    await addColumnIfMissing(
+        "orders",
+        "created_at",
+        "DATETIME NULL"
     );
 
-    if (!emailIndexExists) {
-        try {
-            await pool.query(`
-                ALTER TABLE users
-                ADD UNIQUE KEY unique_email (email)
-            `);
-
-            console.log("Unique email index created.");
-        } catch (error) {
-            console.log(
-                "Could not create unique_email index:",
-                error.message
-            );
-
-            console.log(
-                "This usually means duplicate emails already exist."
-            );
-        }
-    }
+    await addColumnIfMissing(
+        "orders",
+        "updated_at",
+        "DATETIME NULL"
+    );
 
     console.log("Database initialization completed.");
 }
 
-// ============================================================
-// HEALTH
-// ============================================================
+/* =========================================================
+   HEALTH
+========================================================= */
 
 app.get("/health", async (req, res) => {
     try {
@@ -302,22 +348,20 @@ app.get("/health", async (req, res) => {
             status: "OK",
             database: "CONNECTED"
         });
-
     } catch (error) {
         console.error("Health error:", error);
 
         res.status(500).json({
             success: false,
             status: "ERROR",
-            database: "DISCONNECTED",
-            error: error.message
+            database: "DISCONNECTED"
         });
     }
 });
 
-// ============================================================
-// DATABASE TEST
-// ============================================================
+/* =========================================================
+   DATABASE TEST
+========================================================= */
 
 app.get("/api/database-test", async (req, res) => {
     try {
@@ -330,7 +374,6 @@ app.get("/api/database-test", async (req, res) => {
             message: "MySQL connection successful",
             serverTime: rows[0].serverTime
         });
-
     } catch (error) {
         console.error("Database test error:", error);
 
@@ -342,101 +385,115 @@ app.get("/api/database-test", async (req, res) => {
     }
 });
 
-// ============================================================
-// REGISTER
-// ============================================================
+/* =========================================================
+   REGISTER
+========================================================= */
 
 app.post("/api/auth/register", async (req, res) => {
+    const connection = await pool.getConnection();
+
     try {
-        const {
-            username,
-            email,
-            password
-        } = req.body;
+        const username =
+            String(req.body.username || "").trim();
 
-        console.log("Register request received:", {
-            username,
-            email
-        });
+        const email =
+            String(req.body.email || "").trim().toLowerCase();
 
-        if (!username || !email || !password) {
+        const password =
+            String(req.body.password || "");
+
+        if (!username) {
             return res.status(400).json({
                 success: false,
-                message: "Username, email and password are required."
+                message: "Username is required"
             });
         }
 
-        const cleanUsername = String(username).trim();
-        const cleanEmail = String(email).trim().toLowerCase();
-        const cleanPassword = String(password);
-
-        if (cleanUsername.length < 3) {
+        if (!email) {
             return res.status(400).json({
                 success: false,
-                message: "Username must contain at least 3 characters."
+                message: "Email is required"
             });
         }
 
-        if (cleanPassword.length < 6) {
+        if (!password) {
             return res.status(400).json({
                 success: false,
-                message: "Password must contain at least 6 characters."
+                message: "Password is required"
             });
         }
 
-        // ----------------------------------------------------
-        // Check existing username
-        // ----------------------------------------------------
+        if (username.length < 3) {
+            return res.status(400).json({
+                success: false,
+                message: "Username must be at least 3 characters"
+            });
+        }
 
-        const [usernameRows] = await pool.query(
+        if (password.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: "Password must be at least 6 characters"
+            });
+        }
+
+        await connection.beginTransaction();
+
+        /*
+         * Check username
+         */
+        const [usernameRows] = await connection.query(
             `
             SELECT id
             FROM users
             WHERE username = ?
             LIMIT 1
             `,
-            [cleanUsername]
+            [username]
         );
 
         if (usernameRows.length > 0) {
+            await connection.rollback();
+
             return res.status(409).json({
                 success: false,
-                message: "Username already exists."
+                message: "Username already exists"
             });
         }
 
-        // ----------------------------------------------------
-        // Check existing email
-        // ----------------------------------------------------
-
-        const [emailRows] = await pool.query(
+        /*
+         * Check email
+         */
+        const [emailRows] = await connection.query(
             `
             SELECT id
             FROM users
             WHERE email = ?
             LIMIT 1
             `,
-            [cleanEmail]
+            [email]
         );
 
         if (emailRows.length > 0) {
+            await connection.rollback();
+
             return res.status(409).json({
                 success: false,
-                message: "Email already exists."
+                message: "Email already exists"
             });
         }
 
-        // ----------------------------------------------------
-        // Hash password
-        // ----------------------------------------------------
+        const passwordHash = hashPassword(password);
 
-        const passwordHash = hashPassword(cleanPassword);
+        const now = new Date();
 
-        // ----------------------------------------------------
-        // Insert user
-        // ----------------------------------------------------
-
-        const [result] = await pool.query(
+        /*
+         * IMPORTANT:
+         *
+         * Explicitly insert only the columns that SPlay needs.
+         * Old columns are handled separately by migration.
+         */
+        const [result] = await connection.query(
             `
             INSERT INTO users
             (
@@ -447,66 +504,78 @@ app.post("/api/auth/register", async (req, res) => {
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, NULL, NOW(), NOW())
+            VALUES (?, ?, ?, NULL, ?, ?)
             `,
             [
-                cleanUsername,
-                cleanEmail,
-                passwordHash
+                username,
+                email,
+                passwordHash,
+                now,
+                now
             ]
         );
 
+        await connection.commit();
+
         console.log(
-            "User created successfully. ID:",
+            "REGISTER SUCCESS:",
+            username,
+            email,
+            "userId:",
             result.insertId
         );
 
         return res.status(201).json({
             success: true,
-            message: "Account created successfully.",
+            message: "Account created successfully",
             userId: result.insertId
         });
 
     } catch (error) {
-        console.error("================================");
-        console.error("REGISTER ERROR");
-        console.error(error);
-        console.error("================================");
 
-        // TEMPORARY DEBUG RESPONSE
-        // This will help us identify the exact MySQL problem.
+        try {
+            await connection.rollback();
+        } catch (_) {}
 
+        console.error("REGISTER ERROR:", error);
+
+        /*
+         * Temporary detailed error for debugging.
+         */
         return res.status(500).json({
             success: false,
             message: "Could not create account",
-            error: error.message,
-            code: error.code || null,
-            errno: error.errno || null,
-            sqlState: error.sqlState || null
+            error: error.message || "",
+            code: error.code || "",
+            errno: error.errno || "",
+            sqlState: error.sqlState || ""
         });
+
+    } finally {
+        connection.release();
     }
 });
 
-// ============================================================
-// LOGIN
-// ============================================================
+/* =========================================================
+   LOGIN
+========================================================= */
 
 app.post("/api/auth/login", async (req, res) => {
     try {
-        const {
-            email,
-            password
-        } = req.body;
+        const email =
+            String(req.body.email || "").trim().toLowerCase();
+
+        const password =
+            String(req.body.password || "");
 
         if (!email || !password) {
             return res.status(400).json({
                 success: false,
-                message: "Email and password are required."
+                message: "Email and password are required"
             });
         }
 
-        const cleanEmail = String(email).trim().toLowerCase();
-        const passwordHash = hashPassword(String(password));
+        const passwordHash = hashPassword(password);
 
         const [rows] = await pool.query(
             `
@@ -514,63 +583,62 @@ app.post("/api/auth/login", async (req, res) => {
                 id,
                 username,
                 email,
-                password_hash,
-                premium_expires_at
+                premium_expires_at,
+                created_at
             FROM users
             WHERE email = ?
+            AND password_hash = ?
             LIMIT 1
             `,
-            [cleanEmail]
+            [
+                email,
+                passwordHash
+            ]
         );
 
         if (rows.length === 0) {
             return res.status(401).json({
                 success: false,
-                message: "Invalid email or password."
+                message: "Invalid email or password"
             });
         }
 
         const user = rows[0];
 
-        if (user.password_hash !== passwordHash) {
-            return res.status(401).json({
-                success: false,
-                message: "Invalid email or password."
-            });
-        }
-
         return res.json({
             success: true,
-            message: "Login successful.",
+            message: "Login successful",
             userId: user.id,
             username: user.username,
             email: user.email,
-            premiumExpiresAt: user.premium_expires_at
+            premiumExpiresAt:
+                user.premium_expires_at
         });
 
     } catch (error) {
-        console.error("Login error:", error);
+
+        console.error("LOGIN ERROR:", error);
 
         return res.status(500).json({
             success: false,
-            message: "Could not login.",
+            message: "Could not login",
             error: error.message
         });
     }
 });
 
-// ============================================================
-// GET USER
-// ============================================================
+/* =========================================================
+   GET USER
+========================================================= */
 
 app.get("/api/auth/user/:id", async (req, res) => {
     try {
         const userId = Number(req.params.id);
 
-        if (!userId) {
+        if (!Number.isInteger(userId) || userId <= 0) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid user ID."
+                message: "Invalid user ID"
             });
         }
 
@@ -592,7 +660,7 @@ app.get("/api/auth/user/:id", async (req, res) => {
         if (rows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "User not found."
+                message: "User not found"
             });
         }
 
@@ -602,39 +670,44 @@ app.get("/api/auth/user/:id", async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Get user error:", error);
+
+        console.error("GET USER ERROR:", error);
 
         res.status(500).json({
             success: false,
-            message: "Could not get user.",
+            message: "Could not get user",
             error: error.message
         });
     }
 });
 
-// ============================================================
-// PREMIUM PLANS
-// ============================================================
+/* =========================================================
+   PREMIUM PLANS
+========================================================= */
 
 app.get("/api/premium/plans", (req, res) => {
+
     res.json({
         success: true,
         plans: Object.values(PREMIUM_PLANS)
     });
+
 });
 
-// ============================================================
-// PREMIUM STATUS
-// ============================================================
+/* =========================================================
+   PREMIUM STATUS
+========================================================= */
 
 app.get("/api/premium/status/:userId", async (req, res) => {
+
     try {
+
         const userId = Number(req.params.userId);
 
-        if (!userId) {
+        if (!Number.isInteger(userId) || userId <= 0) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid user ID."
+                message: "Invalid user ID"
             });
         }
 
@@ -653,59 +726,74 @@ app.get("/api/premium/status/:userId", async (req, res) => {
         if (rows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "User not found."
+                message: "User not found"
             });
         }
 
-        const expiry = rows[0].premium_expires_at;
+        const expiry =
+            rows[0].premium_expires_at;
 
-        const active =
-            expiry &&
-            new Date(expiry).getTime() > Date.now();
+        let active = false;
+
+        if (expiry) {
+            active =
+                new Date(expiry).getTime() >
+                Date.now();
+        }
 
         res.json({
             success: true,
-            active: Boolean(active),
+            active: active,
             expiresAt: expiry
         });
 
     } catch (error) {
-        console.error("Premium status error:", error);
+
+        console.error(
+            "PREMIUM STATUS ERROR:",
+            error
+        );
 
         res.status(500).json({
             success: false,
-            message: "Could not get premium status.",
+            message: "Could not get premium status",
             error: error.message
         });
     }
+
 });
 
-// ============================================================
-// CREATE ORDER
-// ============================================================
+/* =========================================================
+   CREATE PAYMENT ORDER
+========================================================= */
 
 app.post("/api/payment/create-order", async (req, res) => {
+
     try {
-        const {
-            userId,
-            planId
-        } = req.body;
 
-        const numericUserId = Number(userId);
+        const userId =
+            Number(req.body.userId);
 
-        if (!numericUserId || !planId) {
+        const planId =
+            String(req.body.planId || "").trim();
+
+        if (
+            !Number.isInteger(userId) ||
+            userId <= 0
+        ) {
             return res.status(400).json({
                 success: false,
-                message: "userId and planId are required."
+                message: "Invalid user ID"
             });
         }
 
-        const plan = PREMIUM_PLANS[planId];
+        const plan =
+            PREMIUM_PLANS[planId];
 
         if (!plan) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid premium plan."
+                message: "Invalid premium plan"
             });
         }
 
@@ -716,17 +804,21 @@ app.post("/api/payment/create-order", async (req, res) => {
             WHERE id = ?
             LIMIT 1
             `,
-            [numericUserId]
+            [userId]
         );
 
         if (users.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "User not found."
+                message: "User not found"
             });
         }
 
-        const orderId = generateOrderId();
+        const orderId =
+            generateOrderId();
+
+        const now =
+            new Date();
 
         await pool.query(
             `
@@ -737,184 +829,233 @@ app.post("/api/payment/create-order", async (req, res) => {
                 plan_id,
                 amount,
                 status,
-                created_at
+                created_at,
+                updated_at
             )
-            VALUES (?, ?, ?, ?, 'PENDING', NOW())
+            VALUES (?, ?, ?, ?, 'CREATED', ?, ?)
             `,
             [
                 orderId,
-                numericUserId,
+                userId,
                 planId,
-                plan.rial
+                plan.amountRial,
+                now,
+                now
             ]
         );
 
         /*
-         * Mellat payment request will be added here.
+         * Mellat payment request will be connected here.
          *
-         * IMPORTANT:
-         * Never put Mellat terminal credentials
-         * inside the Android application.
+         * For now the order is created safely in database.
          */
-
-        res.json({
+        return res.json({
             success: true,
-            orderId,
+            message: "Order created",
+            orderId: orderId,
             planId: plan.id,
-            amount: plan.rial,
-            amountToman: plan.toman,
-            message: "Order created successfully."
+            amountToman: plan.amountToman,
+            amountRial: plan.amountRial,
+            status: "CREATED"
         });
 
     } catch (error) {
-        console.error("Create order error:", error);
+
+        console.error(
+            "CREATE ORDER ERROR:",
+            error
+        );
 
         res.status(500).json({
             success: false,
-            message: "Could not create order.",
+            message: "Could not create order",
             error: error.message
         });
     }
+
 });
 
-// ============================================================
-// ORDER STATUS
-// ============================================================
+/* =========================================================
+   ORDER STATUS
+========================================================= */
 
-app.get("/api/payment/order-status/:orderId", async (req, res) => {
-    try {
-        const orderId = String(req.params.orderId);
+app.get(
+    "/api/payment/order-status/:orderId",
+    async (req, res) => {
 
-        const [rows] = await pool.query(
-            `
-            SELECT
-                order_id,
-                user_id,
-                plan_id,
-                amount,
-                status,
-                ref_id,
-                sale_order_id,
-                sale_reference_id,
-                response_code,
-                created_at,
-                paid_at,
-                premium_expires_at
-            FROM orders
-            WHERE order_id = ?
-            LIMIT 1
-            `,
-            [orderId]
-        );
+        try {
 
-        if (rows.length === 0) {
-            return res.status(404).json({
+            const orderId =
+                String(req.params.orderId || "")
+                    .trim();
+
+            if (!orderId) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Order ID is required"
+                });
+            }
+
+            const [rows] = await pool.query(
+                `
+                SELECT
+                    order_id,
+                    user_id,
+                    plan_id,
+                    amount,
+                    status,
+                    ref_id,
+                    sale_order_id,
+                    sale_reference_id,
+                    paid_at,
+                    premium_expires_at,
+                    created_at
+                FROM orders
+                WHERE order_id = ?
+                LIMIT 1
+                `,
+                [orderId]
+            );
+
+            if (rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Order not found"
+                });
+            }
+
+            res.json({
+                success: true,
+                order: rows[0]
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ORDER STATUS ERROR:",
+                error
+            );
+
+            res.status(500).json({
                 success: false,
-                message: "Order not found."
+                message: "Could not get order status",
+                error: error.message
             });
         }
 
-        res.json({
-            success: true,
-            order: rows[0]
-        });
-
-    } catch (error) {
-        console.error("Order status error:", error);
-
-        res.status(500).json({
-            success: false,
-            message: "Could not get order status.",
-            error: error.message
-        });
     }
-});
+);
 
-// ============================================================
-// CANCEL ORDER
-// ============================================================
+/* =========================================================
+   CANCEL PAYMENT
+========================================================= */
 
 app.post("/api/payment/cancel", async (req, res) => {
+
     try {
-        const {
-            orderId
-        } = req.body;
+
+        const orderId =
+            String(req.body.orderId || "")
+                .trim();
 
         if (!orderId) {
             return res.status(400).json({
                 success: false,
-                message: "orderId is required."
+                message: "Order ID is required"
             });
         }
 
         await pool.query(
             `
             UPDATE orders
-            SET status = 'CANCELLED'
+            SET
+                status = 'CANCELLED',
+                updated_at = ?
             WHERE order_id = ?
-            AND status = 'PENDING'
+            AND status = 'CREATED'
             `,
-            [String(orderId)]
+            [
+                new Date(),
+                orderId
+            ]
         );
 
         res.json({
             success: true,
-            message: "Order cancelled."
+            message: "Payment cancelled"
         });
 
     } catch (error) {
-        console.error("Cancel order error:", error);
+
+        console.error(
+            "CANCEL PAYMENT ERROR:",
+            error
+        );
 
         res.status(500).json({
             success: false,
-            message: "Could not cancel order.",
+            message: "Could not cancel payment",
             error: error.message
         });
     }
+
 });
 
-// ============================================================
-// 404
-// ============================================================
+/* =========================================================
+   404
+========================================================= */
 
 app.use((req, res) => {
+
     res.status(404).json({
         success: false,
         message: "Endpoint not found"
     });
+
 });
 
-// ============================================================
-// GLOBAL ERROR HANDLER
-// ============================================================
+/* =========================================================
+   GLOBAL ERROR HANDLER
+========================================================= */
 
 app.use((error, req, res, next) => {
-    console.error("Global server error:", error);
+
+    console.error(
+        "GLOBAL ERROR:",
+        error
+    );
 
     res.status(500).json({
         success: false,
-        message: "Internal server error.",
-        error: error.message
+        message: "Internal server error"
     });
+
 });
 
-// ============================================================
-// START SERVER
-// ============================================================
+/* =========================================================
+   START SERVER
+========================================================= */
 
 async function startServer() {
+
     try {
+
         await initializeDatabase();
 
         app.listen(PORT, () => {
-            console.log(`SPlay backend running on port ${PORT}`);
+
+            console.log(
+                `SPlay backend running on port ${PORT}`
+            );
+
         });
 
     } catch (error) {
-        console.error("================================");
-        console.error("DATABASE INITIALIZATION FAILED");
-        console.error(error);
-        console.error("================================");
+
+        console.error(
+            "SERVER START ERROR:",
+            error
+        );
 
         process.exit(1);
     }

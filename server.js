@@ -98,16 +98,21 @@ function addDays(date, days) {
 ========================================================= */
 
 async function columnExists(tableName, columnName) {
-    const [rows] = await pool.query(
-        `
-        SELECT COUNT(*) AS count
-        FROM information_schema.columns
-        WHERE table_schema = DATABASE()
-          AND table_name = ?
-          AND column_name = ?
-        `,
-        [tableName, columnName]
-    );
+
+    const [rows] =
+        await pool.query(
+            `
+            SELECT COUNT(*) AS count
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = ?
+              AND column_name = ?
+            `,
+            [
+                tableName,
+                columnName
+            ]
+        );
 
     return Number(rows[0].count) > 0;
 }
@@ -117,12 +122,15 @@ async function ensureColumn(
     columnName,
     definition
 ) {
-    const exists = await columnExists(
-        tableName,
-        columnName
-    );
+
+    const exists =
+        await columnExists(
+            tableName,
+            columnName
+        );
 
     if (!exists) {
+
         console.log(
             `Column ${tableName}.${columnName} is missing. Creating it...`
         );
@@ -138,10 +146,10 @@ async function ensureColumn(
     }
 }
 
-/*
- * This function is intentionally called immediately
- * before registration as well as during startup.
- */
+/* =========================================================
+   USERS TABLE
+========================================================= */
+
 async function ensureUsersTable() {
 
     await pool.query(`
@@ -250,6 +258,33 @@ async function ensureOrdersTable() {
         "VARCHAR(30) NULL DEFAULT 'CREATED'"
     );
 
+    /*
+     * IMPORTANT:
+     *
+     * The existing database may have the status column
+     * as ENUM or another incompatible type.
+     *
+     * CREATE TABLE IF NOT EXISTS does NOT change an
+     * existing column.
+     *
+     * Therefore we explicitly convert status to VARCHAR.
+     */
+    console.log(
+        "Ensuring orders.status uses VARCHAR..."
+    );
+
+    await pool.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN status
+        VARCHAR(30)
+        NULL
+        DEFAULT 'CREATED'
+    `);
+
+    console.log(
+        "orders.status is ready."
+    );
+
     await ensureColumn(
         "orders",
         "ref_id",
@@ -313,7 +348,9 @@ async function initializeDatabase() {
 
     await ensureOrdersTable();
 
-    console.log("Database initialization completed.");
+    console.log(
+        "Database initialization completed."
+    );
 }
 
 /* =========================================================
@@ -324,7 +361,9 @@ app.get("/health", async (req, res) => {
 
     try {
 
-        await pool.query("SELECT 1");
+        await pool.query(
+            "SELECT 1"
+        );
 
         res.json({
             success: true,
@@ -351,497 +390,547 @@ app.get("/health", async (req, res) => {
    DATABASE TEST
 ========================================================= */
 
-app.get("/api/database-test", async (req, res) => {
+app.get(
+    "/api/database-test",
+    async (req, res) => {
 
-    try {
+        try {
 
-        const [rows] = await pool.query(
-            "SELECT NOW() AS serverTime"
-        );
+            const [rows] =
+                await pool.query(
+                    "SELECT NOW() AS serverTime"
+                );
 
-        res.json({
-            success: true,
-            message: "MySQL connection successful",
-            serverTime: rows[0].serverTime
-        });
+            res.json({
+                success: true,
+                message:
+                    "MySQL connection successful",
+                serverTime:
+                    rows[0].serverTime
+            });
 
-    } catch (error) {
+        } catch (error) {
 
-        console.error(
-            "DATABASE TEST ERROR:",
-            error
-        );
+            console.error(
+                "DATABASE TEST ERROR:",
+                error
+            );
 
-        res.status(500).json({
-            success: false,
-            message: "MySQL connection failed",
-            error: error.message
-        });
+            res.status(500).json({
+                success: false,
+                message:
+                    "MySQL connection failed",
+                error:
+                    error.message
+            });
+        }
     }
-});
+);
 
 /* =========================================================
    REGISTER
 ========================================================= */
 
-app.post("/api/auth/register", async (req, res) => {
+app.post(
+    "/api/auth/register",
+    async (req, res) => {
 
-    let connection = null;
+        let connection = null;
 
-    try {
+        try {
 
-        console.log("=================================");
-        console.log("REGISTER REQUEST RECEIVED");
-        console.log("=================================");
-
-        /*
-         * IMPORTANT:
-         *
-         * Make absolutely sure the old users table
-         * has the required columns before ANY SELECT.
-         */
-        await ensureUsersTable();
-
-        const username =
-            String(req.body.username || "").trim();
-
-        const email =
-            String(req.body.email || "")
-                .trim()
-                .toLowerCase();
-
-        const password =
-            String(req.body.password || "");
-
-        console.log(
-            "Register username:",
-            username
-        );
-
-        console.log(
-            "Register email:",
-            email
-        );
-
-        if (!username) {
-            return res.status(400).json({
-                success: false,
-                message: "Username is required"
-            });
-        }
-
-        if (!email) {
-            return res.status(400).json({
-                success: false,
-                message: "Email is required"
-            });
-        }
-
-        if (!password) {
-            return res.status(400).json({
-                success: false,
-                message: "Password is required"
-            });
-        }
-
-        if (username.length < 3) {
-            return res.status(400).json({
-                success: false,
-                message:
-                    "Username must be at least 3 characters"
-            });
-        }
-
-        if (password.length < 6) {
-            return res.status(400).json({
-                success: false,
-                message:
-                    "Password must be at least 6 characters"
-            });
-        }
-
-        connection =
-            await pool.getConnection();
-
-        await connection.beginTransaction();
-
-        /*
-         * Check username
-         */
-        const [usernameRows] =
-            await connection.query(
-                `
-                SELECT id
-                FROM users
-                WHERE username = ?
-                LIMIT 1
-                `,
-                [username]
+            console.log(
+                "================================="
             );
 
-        if (usernameRows.length > 0) {
-
-            await connection.rollback();
-
-            return res.status(409).json({
-                success: false,
-                message:
-                    "Username already exists"
-            });
-        }
-
-        /*
-         * Check email
-         */
-        const [emailRows] =
-            await connection.query(
-                `
-                SELECT id
-                FROM users
-                WHERE email = ?
-                LIMIT 1
-                `,
-                [email]
+            console.log(
+                "REGISTER REQUEST RECEIVED"
             );
 
-        if (emailRows.length > 0) {
+            console.log(
+                "================================="
+            );
 
-            await connection.rollback();
+            await ensureUsersTable();
 
-            return res.status(409).json({
-                success: false,
-                message:
-                    "Email already exists"
-            });
-        }
+            const username =
+                String(
+                    req.body.username || ""
+                ).trim();
 
-        const passwordHash =
-            hashPassword(password);
-
-        const now =
-            new Date();
-
-        /*
-         * Create account
-         */
-        const [result] =
-            await connection.query(
-                `
-                INSERT INTO users
-                (
-                    username,
-                    email,
-                    password_hash,
-                    premium_expires_at,
-                    created_at,
-                    updated_at
+            const email =
+                String(
+                    req.body.email || ""
                 )
-                VALUES
-                (?, ?, ?, NULL, ?, ?)
-                `,
-                [
-                    username,
-                    email,
-                    passwordHash,
-                    now,
-                    now
-                ]
+                    .trim()
+                    .toLowerCase();
+
+            const password =
+                String(
+                    req.body.password || ""
+                );
+
+            console.log(
+                "Register username:",
+                username
             );
 
-        await connection.commit();
+            console.log(
+                "Register email:",
+                email
+            );
 
-        console.log(
-            "================================="
-        );
+            if (!username) {
 
-        console.log(
-            "REGISTER SUCCESS"
-        );
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Username is required"
+                });
+            }
 
-        console.log(
-            "User ID:",
-            result.insertId
-        );
+            if (!email) {
 
-        console.log(
-            "================================="
-        );
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Email is required"
+                });
+            }
 
-        return res.status(201).json({
+            if (!password) {
 
-            success: true,
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Password is required"
+                });
+            }
 
-            message:
-                "Account created successfully",
+            if (username.length < 3) {
 
-            userId:
-                result.insertId
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Username must be at least 3 characters"
+                });
+            }
 
-        });
+            if (password.length < 6) {
 
-    } catch (error) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Password must be at least 6 characters"
+                });
+            }
 
-        if (connection) {
+            connection =
+                await pool.getConnection();
 
-            try {
+            await connection.beginTransaction();
+
+            const [usernameRows] =
+                await connection.query(
+                    `
+                    SELECT id
+                    FROM users
+                    WHERE username = ?
+                    LIMIT 1
+                    `,
+                    [username]
+                );
+
+            if (
+                usernameRows.length > 0
+            ) {
+
                 await connection.rollback();
-            } catch (_) {}
 
-        }
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        "Username already exists"
+                });
+            }
 
-        console.error(
-            "================================="
-        );
+            const [emailRows] =
+                await connection.query(
+                    `
+                    SELECT id
+                    FROM users
+                    WHERE email = ?
+                    LIMIT 1
+                    `,
+                    [email]
+                );
 
-        console.error(
-            "REGISTER ERROR"
-        );
+            if (
+                emailRows.length > 0
+            ) {
 
-        console.error(
-            "Message:",
-            error.message
-        );
+                await connection.rollback();
 
-        console.error(
-            "Code:",
-            error.code
-        );
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        "Email already exists"
+                });
+            }
 
-        console.error(
-            "Errno:",
-            error.errno
-        );
+            const passwordHash =
+                hashPassword(
+                    password
+                );
 
-        console.error(
-            "SQL State:",
-            error.sqlState
-        );
+            const now =
+                new Date();
 
-        console.error(
-            "================================="
-        );
+            const [result] =
+                await connection.query(
+                    `
+                    INSERT INTO users
+                    (
+                        username,
+                        email,
+                        password_hash,
+                        premium_expires_at,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES
+                    (?, ?, ?, NULL, ?, ?)
+                    `,
+                    [
+                        username,
+                        email,
+                        passwordHash,
+                        now,
+                        now
+                    ]
+                );
 
-        return res.status(500).json({
+            await connection.commit();
 
-            success: false,
+            console.log(
+                "================================="
+            );
 
-            message:
-                "Could not create account",
+            console.log(
+                "REGISTER SUCCESS"
+            );
 
-            error:
-                error.message || "",
+            console.log(
+                "User ID:",
+                result.insertId
+            );
 
-            code:
-                error.code || "",
+            console.log(
+                "================================="
+            );
 
-            errno:
-                error.errno || "",
+            return res.status(201).json({
 
-            sqlState:
-                error.sqlState || ""
+                success: true,
 
-        });
+                message:
+                    "Account created successfully",
 
-    } finally {
+                userId:
+                    result.insertId
 
-        if (connection) {
-            connection.release();
+            });
+
+        } catch (error) {
+
+            if (connection) {
+
+                try {
+                    await connection.rollback();
+                } catch (_) {}
+            }
+
+            console.error(
+                "================================="
+            );
+
+            console.error(
+                "REGISTER ERROR"
+            );
+
+            console.error(
+                "Message:",
+                error.message
+            );
+
+            console.error(
+                "Code:",
+                error.code
+            );
+
+            console.error(
+                "Errno:",
+                error.errno
+            );
+
+            console.error(
+                "SQL State:",
+                error.sqlState
+            );
+
+            console.error(
+                "================================="
+            );
+
+            return res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Could not create account",
+
+                error:
+                    error.message || "",
+
+                code:
+                    error.code || "",
+
+                errno:
+                    error.errno || "",
+
+                sqlState:
+                    error.sqlState || ""
+
+            });
+
+        } finally {
+
+            if (connection) {
+                connection.release();
+            }
         }
     }
-});
+);
 
 /* =========================================================
    LOGIN
 ========================================================= */
 
-app.post("/api/auth/login", async (req, res) => {
+app.post(
+    "/api/auth/login",
+    async (req, res) => {
 
-    try {
+        try {
 
-        await ensureUsersTable();
+            await ensureUsersTable();
 
-        const email =
-            String(req.body.email || "")
-                .trim()
-                .toLowerCase();
+            const email =
+                String(
+                    req.body.email || ""
+                )
+                    .trim()
+                    .toLowerCase();
 
-        const password =
-            String(req.body.password || "");
+            const password =
+                String(
+                    req.body.password || ""
+                );
 
-        if (!email || !password) {
+            if (
+                !email ||
+                !password
+            ) {
 
-            return res.status(400).json({
-                success: false,
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Email and password are required"
+                });
+            }
+
+            const passwordHash =
+                hashPassword(
+                    password
+                );
+
+            const [rows] =
+                await pool.query(
+                    `
+                    SELECT
+                        id,
+                        username,
+                        email,
+                        premium_expires_at,
+                        created_at
+                    FROM users
+                    WHERE email = ?
+                      AND password_hash = ?
+                    LIMIT 1
+                    `,
+                    [
+                        email,
+                        passwordHash
+                    ]
+                );
+
+            if (
+                rows.length === 0
+            ) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                        "Invalid email or password"
+                });
+            }
+
+            const user =
+                rows[0];
+
+            res.json({
+
+                success: true,
+
                 message:
-                    "Email and password are required"
+                    "Login successful",
+
+                userId:
+                    user.id,
+
+                username:
+                    user.username,
+
+                email:
+                    user.email,
+
+                premiumExpiresAt:
+                    user.premium_expires_at
+
             });
-        }
 
-        const passwordHash =
-            hashPassword(password);
+        } catch (error) {
 
-        const [rows] =
-            await pool.query(
-                `
-                SELECT
-                    id,
-                    username,
-                    email,
-                    premium_expires_at,
-                    created_at
-                FROM users
-                WHERE email = ?
-                  AND password_hash = ?
-                LIMIT 1
-                `,
-                [
-                    email,
-                    passwordHash
-                ]
+            console.error(
+                "LOGIN ERROR:",
+                error
             );
 
-        if (rows.length === 0) {
+            res.status(500).json({
 
-            return res.status(401).json({
                 success: false,
+
                 message:
-                    "Invalid email or password"
+                    "Could not login",
+
+                error:
+                    error.message
+
             });
         }
-
-        const user =
-            rows[0];
-
-        res.json({
-
-            success: true,
-
-            message:
-                "Login successful",
-
-            userId:
-                user.id,
-
-            username:
-                user.username,
-
-            email:
-                user.email,
-
-            premiumExpiresAt:
-                user.premium_expires_at
-
-        });
-
-    } catch (error) {
-
-        console.error(
-            "LOGIN ERROR:",
-            error
-        );
-
-        res.status(500).json({
-
-            success: false,
-
-            message:
-                "Could not login",
-
-            error:
-                error.message
-
-        });
     }
-});
+);
 
 /* =========================================================
    GET USER
 ========================================================= */
 
-app.get("/api/auth/user/:id", async (req, res) => {
+app.get(
+    "/api/auth/user/:id",
+    async (req, res) => {
 
-    try {
+        try {
 
-        await ensureUsersTable();
+            await ensureUsersTable();
 
-        const userId =
-            Number(req.params.id);
+            const userId =
+                Number(
+                    req.params.id
+                );
 
-        if (
-            !Number.isInteger(userId) ||
-            userId <= 0
-        ) {
+            if (
+                !Number.isInteger(userId) ||
+                userId <= 0
+            ) {
 
-            return res.status(400).json({
-                success: false,
-                message:
-                    "Invalid user ID"
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid user ID"
+                });
+            }
+
+            const [rows] =
+                await pool.query(
+                    `
+                    SELECT
+                        id,
+                        username,
+                        email,
+                        premium_expires_at,
+                        created_at
+                    FROM users
+                    WHERE id = ?
+                    LIMIT 1
+                    `,
+                    [userId]
+                );
+
+            if (
+                rows.length === 0
+            ) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "User not found"
+                });
+            }
+
+            res.json({
+                success: true,
+                user:
+                    rows[0]
             });
-        }
 
-        const [rows] =
-            await pool.query(
-                `
-                SELECT
-                    id,
-                    username,
-                    email,
-                    premium_expires_at,
-                    created_at
-                FROM users
-                WHERE id = ?
-                LIMIT 1
-                `,
-                [userId]
+        } catch (error) {
+
+            console.error(
+                "GET USER ERROR:",
+                error
             );
 
-        if (rows.length === 0) {
-
-            return res.status(404).json({
+            res.status(500).json({
                 success: false,
                 message:
-                    "User not found"
+                    "Could not get user",
+                error:
+                    error.message
             });
         }
-
-        res.json({
-            success: true,
-            user: rows[0]
-        });
-
-    } catch (error) {
-
-        console.error(
-            "GET USER ERROR:",
-            error
-        );
-
-        res.status(500).json({
-            success: false,
-            message:
-                "Could not get user",
-            error:
-                error.message
-        });
     }
-});
+);
 
 /* =========================================================
    PREMIUM PLANS
 ========================================================= */
 
-app.get("/api/premium/plans", (req, res) => {
+app.get(
+    "/api/premium/plans",
+    (req, res) => {
 
-    res.json({
+        res.json({
 
-        success: true,
+            success: true,
 
-        plans:
-            Object.values(PREMIUM_PLANS)
+            plans:
+                Object.values(
+                    PREMIUM_PLANS
+                )
 
-    });
+        });
 
-});
+    }
+);
 
 /* =========================================================
    PREMIUM STATUS
@@ -856,7 +945,9 @@ app.get(
             await ensureUsersTable();
 
             const userId =
-                Number(req.params.userId);
+                Number(
+                    req.params.userId
+                );
 
             if (
                 !Number.isInteger(userId) ||
@@ -883,7 +974,9 @@ app.get(
                     [userId]
                 );
 
-            if (rows.length === 0) {
+            if (
+                rows.length === 0
+            ) {
 
                 return res.status(404).json({
                     success: false,
@@ -910,11 +1003,9 @@ app.get(
                 success: true,
 
                 active:
-
                     active,
 
                 expiresAt:
-
                     expiry
 
             });
@@ -938,7 +1029,6 @@ app.get(
 
             });
         }
-
     }
 );
 
@@ -953,10 +1043,13 @@ app.post(
         try {
 
             await ensureUsersTable();
+
             await ensureOrdersTable();
 
             const userId =
-                Number(req.body.userId);
+                Number(
+                    req.body.userId
+                );
 
             const planId =
                 String(
@@ -976,7 +1069,9 @@ app.post(
             }
 
             const plan =
-                PREMIUM_PLANS[planId];
+                PREMIUM_PLANS[
+                    planId
+                ];
 
             if (!plan) {
 
@@ -998,7 +1093,9 @@ app.post(
                     [userId]
                 );
 
-            if (users.length === 0) {
+            if (
+                users.length === 0
+            ) {
 
                 return res.status(404).json({
                     success: false,
@@ -1026,7 +1123,15 @@ app.post(
                     updated_at
                 )
                 VALUES
-                (?, ?, ?, ?, 'CREATED', ?, ?)
+                (
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    'CREATED',
+                    ?,
+                    ?
+                )
                 `,
                 [
                     orderId,
@@ -1036,6 +1141,38 @@ app.post(
                     now,
                     now
                 ]
+            );
+
+            console.log(
+                "================================="
+            );
+
+            console.log(
+                "ORDER CREATED"
+            );
+
+            console.log(
+                "Order ID:",
+                orderId
+            );
+
+            console.log(
+                "User ID:",
+                userId
+            );
+
+            console.log(
+                "Plan:",
+                planId
+            );
+
+            console.log(
+                "Amount Rial:",
+                plan.amountRial
+            );
+
+            console.log(
+                "================================="
             );
 
             res.json({
@@ -1065,8 +1202,35 @@ app.post(
         } catch (error) {
 
             console.error(
-                "CREATE ORDER ERROR:",
-                error
+                "================================="
+            );
+
+            console.error(
+                "CREATE ORDER ERROR"
+            );
+
+            console.error(
+                "Message:",
+                error.message
+            );
+
+            console.error(
+                "Code:",
+                error.code
+            );
+
+            console.error(
+                "Errno:",
+                error.errno
+            );
+
+            console.error(
+                "SQL State:",
+                error.sqlState
+            );
+
+            console.error(
+                "================================="
             );
 
             res.status(500).json({
@@ -1077,11 +1241,19 @@ app.post(
                     "Could not create order",
 
                 error:
-                    error.message
+                    error.message,
+
+                code:
+                    error.code || "",
+
+                errno:
+                    error.errno || "",
+
+                sqlState:
+                    error.sqlState || ""
 
             });
         }
-
     }
 );
 
@@ -1133,7 +1305,9 @@ app.get(
                     [orderId]
                 );
 
-            if (rows.length === 0) {
+            if (
+                rows.length === 0
+            ) {
 
                 return res.status(404).json({
                     success: false,
@@ -1170,7 +1344,6 @@ app.get(
 
             });
         }
-
     }
 );
 
@@ -1243,7 +1416,6 @@ app.post(
 
             });
         }
-
     }
 );
 
@@ -1251,18 +1423,20 @@ app.post(
    404
 ========================================================= */
 
-app.use((req, res) => {
+app.use(
+    (req, res) => {
 
-    res.status(404).json({
+        res.status(404).json({
 
-        success: false,
+            success: false,
 
-        message:
-            "Endpoint not found"
+            message:
+                "Endpoint not found"
 
-    });
+        });
 
-});
+    }
+);
 
 /* =========================================================
    GLOBAL ERROR HANDLER

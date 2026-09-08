@@ -65,7 +65,6 @@ const PREMIUM_PLANS = {
 // ==========================================
 
 function hashPassword(password) {
-
     return crypto
         .createHash("sha256")
         .update(password)
@@ -73,7 +72,47 @@ function hashPassword(password) {
 }
 
 // ==========================================
-// Database Initialization
+// Check Column Exists
+// ==========================================
+
+async function columnExists(connection, tableName, columnName) {
+
+    const [rows] = await connection.query(
+        `
+        SELECT COUNT(*) AS count
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = ?
+          AND COLUMN_NAME = ?
+        `,
+        [tableName, columnName]
+    );
+
+    return Number(rows[0].count) > 0;
+}
+
+// ==========================================
+// Check Index Exists
+// ==========================================
+
+async function indexExists(connection, tableName, indexName) {
+
+    const [rows] = await connection.query(
+        `
+        SELECT COUNT(*) AS count
+        FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = ?
+          AND INDEX_NAME = ?
+        `,
+        [tableName, indexName]
+    );
+
+    return Number(rows[0].count) > 0;
+}
+
+// ==========================================
+// Database Initialization + Migration
 // ==========================================
 
 async function initializeDatabase() {
@@ -82,15 +121,21 @@ async function initializeDatabase() {
 
     try {
 
+        console.log("Checking database structure...");
+
+        // ======================================
+        // USERS TABLE
+        // ======================================
+
         await connection.query(`
             CREATE TABLE IF NOT EXISTS users (
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
 
                 username VARCHAR(100) NULL,
 
-                email VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NULL,
 
-                password_hash VARCHAR(255) NOT NULL,
+                password_hash VARCHAR(255) NULL,
 
                 premium_expires_at DATETIME NULL,
 
@@ -99,11 +144,128 @@ async function initializeDatabase() {
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                     ON UPDATE CURRENT_TIMESTAMP,
 
-                PRIMARY KEY (id),
-
-                UNIQUE KEY unique_email (email)
+                PRIMARY KEY (id)
             )
         `);
+
+        console.log("Users table checked.");
+
+        // ======================================
+        // USERS MIGRATION
+        // ======================================
+
+        // Add username if old table doesn't have it
+        if (!(await columnExists(connection, "users", "username"))) {
+
+            console.log("Adding users.username...");
+
+            await connection.query(`
+                ALTER TABLE users
+                ADD COLUMN username VARCHAR(100) NULL
+            `);
+        }
+
+        // Add email if old table doesn't have it
+        if (!(await columnExists(connection, "users", "email"))) {
+
+            console.log("Adding users.email...");
+
+            await connection.query(`
+                ALTER TABLE users
+                ADD COLUMN email VARCHAR(255) NULL
+            `);
+        }
+
+        // Add password_hash if old table doesn't have it
+        if (!(await columnExists(connection, "users", "password_hash"))) {
+
+            console.log("Adding users.password_hash...");
+
+            await connection.query(`
+                ALTER TABLE users
+                ADD COLUMN password_hash VARCHAR(255) NULL
+            `);
+        }
+
+        // Add premium_expires_at if old table doesn't have it
+        if (!(await columnExists(connection, "users", "premium_expires_at"))) {
+
+            console.log("Adding users.premium_expires_at...");
+
+            await connection.query(`
+                ALTER TABLE users
+                ADD COLUMN premium_expires_at DATETIME NULL
+            `);
+        }
+
+        // Add created_at if old table doesn't have it
+        if (!(await columnExists(connection, "users", "created_at"))) {
+
+            console.log("Adding users.created_at...");
+
+            await connection.query(`
+                ALTER TABLE users
+                ADD COLUMN created_at DATETIME NOT NULL
+                DEFAULT CURRENT_TIMESTAMP
+            `);
+        }
+
+        // Add updated_at if old table doesn't have it
+        if (!(await columnExists(connection, "users", "updated_at"))) {
+
+            console.log("Adding users.updated_at...");
+
+            await connection.query(`
+                ALTER TABLE users
+                ADD COLUMN updated_at DATETIME NOT NULL
+                DEFAULT CURRENT_TIMESTAMP
+                ON UPDATE CURRENT_TIMESTAMP
+            `);
+        }
+
+        // ======================================
+        // EMAIL UNIQUE INDEX
+        // ======================================
+
+        const hasEmailIndex =
+            await indexExists(
+                connection,
+                "users",
+                "unique_email"
+            );
+
+        if (!hasEmailIndex) {
+
+            console.log("Adding unique email index...");
+
+            try {
+
+                await connection.query(`
+                    ALTER TABLE users
+                    ADD UNIQUE KEY unique_email (email)
+                `);
+
+                console.log(
+                    "Unique email index added."
+                );
+
+            } catch (indexError) {
+
+                console.log(
+                    "Could not add unique email index yet."
+                );
+
+                console.log(
+                    "This is usually caused by duplicate existing email values."
+                );
+
+                console.log(indexError.message);
+            }
+        }
+
+        // ======================================
+        // ORDERS TABLE
+        // ======================================
 
         await connection.query(`
             CREATE TABLE IF NOT EXISTS orders (
@@ -143,16 +305,77 @@ async function initializeDatabase() {
 
                 INDEX idx_orders_status (status),
 
-                INDEX idx_orders_ref_id (ref_id),
-
-                CONSTRAINT fk_orders_user
-                    FOREIGN KEY (user_id)
-                    REFERENCES users(id)
-                    ON DELETE CASCADE
+                INDEX idx_orders_ref_id (ref_id)
             )
         `);
 
-        console.log("Database tables are ready.");
+        console.log("Orders table checked.");
+
+        // ======================================
+        // ORDERS MIGRATION
+        // ======================================
+
+        if (!(await columnExists(connection, "orders", "ref_id"))) {
+
+            console.log("Adding orders.ref_id...");
+
+            await connection.query(`
+                ALTER TABLE orders
+                ADD COLUMN ref_id VARCHAR(255) NULL
+            `);
+        }
+
+        if (!(await columnExists(connection, "orders", "sale_order_id"))) {
+
+            console.log("Adding orders.sale_order_id...");
+
+            await connection.query(`
+                ALTER TABLE orders
+                ADD COLUMN sale_order_id VARCHAR(100) NULL
+            `);
+        }
+
+        if (!(await columnExists(connection, "orders", "sale_reference_id"))) {
+
+            console.log("Adding orders.sale_reference_id...");
+
+            await connection.query(`
+                ALTER TABLE orders
+                ADD COLUMN sale_reference_id VARCHAR(100) NULL
+            `);
+        }
+
+        if (!(await columnExists(connection, "orders", "response_code"))) {
+
+            console.log("Adding orders.response_code...");
+
+            await connection.query(`
+                ALTER TABLE orders
+                ADD COLUMN response_code VARCHAR(20) NULL
+            `);
+        }
+
+        if (!(await columnExists(connection, "orders", "paid_at"))) {
+
+            console.log("Adding orders.paid_at...");
+
+            await connection.query(`
+                ALTER TABLE orders
+                ADD COLUMN paid_at DATETIME NULL
+            `);
+        }
+
+        if (!(await columnExists(connection, "orders", "premium_expires_at"))) {
+
+            console.log("Adding orders.premium_expires_at...");
+
+            await connection.query(`
+                ALTER TABLE orders
+                ADD COLUMN premium_expires_at DATETIME NULL
+            `);
+        }
+
+        console.log("Database migration completed successfully.");
 
     } finally {
 
@@ -172,7 +395,7 @@ app.get("/", (req, res) => {
 
         app: "SPlay Backend",
 
-        version: "1.1.0",
+        version: "1.2.0",
 
         message: "SPlay backend is running"
     });
@@ -223,17 +446,20 @@ app.get("/api/database-test", async (req, res) => {
 
     try {
 
-        const [rows] = await db.query(
-            "SELECT NOW() AS server_time"
-        );
+        const [rows] =
+            await db.query(
+                "SELECT NOW() AS server_time"
+            );
 
         res.json({
 
             success: true,
 
-            message: "MySQL connection successful",
+            message:
+                "MySQL connection successful",
 
-            serverTime: rows[0].server_time
+            serverTime:
+                rows[0].server_time
         });
 
     } catch (error) {
@@ -247,7 +473,8 @@ app.get("/api/database-test", async (req, res) => {
 
             success: false,
 
-            message: "MySQL connection failed"
+            message:
+                "MySQL connection failed"
         });
     }
 });
@@ -255,27 +482,11 @@ app.get("/api/database-test", async (req, res) => {
 // ==========================================
 // REGISTER
 // ==========================================
-//
-// POST:
-//
-// {
-//     "email": "test@example.com",
-//     "password": "123456"
-// }
-//
-// Optional:
-//
-// {
-//     "email": "test@example.com",
-//     "password": "123456",
-//     "username": "SaYMoN"
-// }
-//
-// ==========================================
 
 app.post("/api/auth/register", async (req, res) => {
 
-    const connection = await db.getConnection();
+    const connection =
+        await db.getConnection();
 
     try {
 
@@ -291,9 +502,9 @@ app.post("/api/auth/register", async (req, res) => {
             String(req.body.username || "")
                 .trim();
 
-        // ------------------------------
+        // --------------------------------------
         // Validation
-        // ------------------------------
+        // --------------------------------------
 
         if (!email) {
 
@@ -301,7 +512,19 @@ app.post("/api/auth/register", async (req, res) => {
 
                 success: false,
 
-                message: "Email is required"
+                message:
+                    "Email is required"
+            });
+        }
+
+        if (email.length > 255) {
+
+            return res.status(400).json({
+
+                success: false,
+
+                message:
+                    "Email is too long"
             });
         }
 
@@ -318,7 +541,8 @@ app.post("/api/auth/register", async (req, res) => {
 
         if (username.length === 0) {
 
-            username = email.split("@")[0];
+            username =
+                email.split("@")[0];
         }
 
         if (username.length > 100) {
@@ -327,13 +551,14 @@ app.post("/api/auth/register", async (req, res) => {
 
                 success: false,
 
-                message: "Username is too long"
+                message:
+                    "Username is too long"
             });
         }
 
-        // ------------------------------
-        // Check existing user
-        // ------------------------------
+        // --------------------------------------
+        // Check existing account
+        // --------------------------------------
 
         const [existingUsers] =
             await connection.query(
@@ -357,16 +582,16 @@ app.post("/api/auth/register", async (req, res) => {
             });
         }
 
-        // ------------------------------
-        // Hash password
-        // ------------------------------
+        // --------------------------------------
+        // Password hash
+        // --------------------------------------
 
         const passwordHash =
             hashPassword(password);
 
-        // ------------------------------
+        // --------------------------------------
         // Create user
-        // ------------------------------
+        // --------------------------------------
 
         const [result] =
             await connection.query(
@@ -389,9 +614,9 @@ app.post("/api/auth/register", async (req, res) => {
         const userId =
             Number(result.insertId);
 
-        // ------------------------------
+        // --------------------------------------
         // Response
-        // ------------------------------
+        // --------------------------------------
 
         res.status(201).json({
 
@@ -402,13 +627,20 @@ app.post("/api/auth/register", async (req, res) => {
 
             user: {
 
-                id: userId,
+                id:
+                    userId,
 
-                username: username,
+                username:
+                    username,
 
-                email: email,
+                email:
+                    email,
 
-                premiumExpiresAt: null
+                premiumActive:
+                    false,
+
+                premiumExpiresAt:
+                    null
             }
         });
 
@@ -418,6 +650,20 @@ app.post("/api/auth/register", async (req, res) => {
             "Register error:",
             error
         );
+
+        // Duplicate email protection
+        if (
+            error.code === "ER_DUP_ENTRY"
+        ) {
+
+            return res.status(409).json({
+
+                success: false,
+
+                message:
+                    "An account with this email already exists"
+            });
+        }
 
         res.status(500).json({
 
@@ -436,15 +682,6 @@ app.post("/api/auth/register", async (req, res) => {
 // ==========================================
 // LOGIN
 // ==========================================
-//
-// POST:
-//
-// {
-//     "email": "test@example.com",
-//     "password": "123456"
-// }
-//
-// ==========================================
 
 app.post("/api/auth/login", async (req, res) => {
 
@@ -458,9 +695,9 @@ app.post("/api/auth/login", async (req, res) => {
         const password =
             String(req.body.password || "");
 
-        // ------------------------------
+        // --------------------------------------
         // Validation
-        // ------------------------------
+        // --------------------------------------
 
         if (!email || !password) {
 
@@ -473,9 +710,9 @@ app.post("/api/auth/login", async (req, res) => {
             });
         }
 
-        // ------------------------------
+        // --------------------------------------
         // Find user
-        // ------------------------------
+        // --------------------------------------
 
         const [users] =
             await db.query(
@@ -507,14 +744,15 @@ app.post("/api/auth/login", async (req, res) => {
         const user =
             users[0];
 
-        // ------------------------------
+        // --------------------------------------
         // Check password
-        // ------------------------------
+        // --------------------------------------
 
         const passwordHash =
             hashPassword(password);
 
         if (
+            !user.password_hash ||
             passwordHash !==
             user.password_hash
         ) {
@@ -528,27 +766,27 @@ app.post("/api/auth/login", async (req, res) => {
             });
         }
 
-        // ------------------------------
-        // Check Premium
-        // ------------------------------
+        // --------------------------------------
+        // Premium status
+        // --------------------------------------
 
-        let premiumActive = false;
+        let premiumActive =
+            false;
 
-        if (user.premium_expires_at) {
-
-            const expiry =
-                new Date(
-                    user.premium_expires_at
-                ).getTime();
+        if (
+            user.premium_expires_at
+        ) {
 
             premiumActive =
-                expiry >
+                new Date(
+                    user.premium_expires_at
+                ).getTime() >
                 Date.now();
         }
 
-        // ------------------------------
+        // --------------------------------------
         // Response
-        // ------------------------------
+        // --------------------------------------
 
         res.json({
 
@@ -594,160 +832,160 @@ app.post("/api/auth/login", async (req, res) => {
 });
 
 // ==========================================
-// Get User
+// GET USER
 // ==========================================
 
-app.get("/api/auth/user/:userId", async (req, res) => {
+app.get(
+    "/api/auth/user/:userId",
+    async (req, res) => {
 
-    try {
+        try {
 
-        const userId =
-            Number(req.params.userId);
+            const userId =
+                Number(req.params.userId);
 
-        if (
-            !Number.isInteger(userId) ||
-            userId <= 0
-        ) {
+            if (
+                !Number.isInteger(userId) ||
+                userId <= 0
+            ) {
 
-            return res.status(400).json({
+                return res.status(400).json({
 
-                success: false,
+                    success: false,
 
-                message:
-                    "Invalid user ID"
+                    message:
+                        "Invalid user ID"
+                });
+            }
+
+            const [users] =
+                await db.query(
+                    `
+                    SELECT
+                        id,
+                        username,
+                        email,
+                        premium_expires_at,
+                        created_at
+                    FROM users
+                    WHERE id = ?
+                    LIMIT 1
+                    `,
+                    [userId]
+                );
+
+            if (users.length === 0) {
+
+                return res.status(404).json({
+
+                    success: false,
+
+                    message:
+                        "User not found"
+                });
+            }
+
+            const user =
+                users[0];
+
+            let premiumActive =
+                false;
+
+            if (
+                user.premium_expires_at
+            ) {
+
+                premiumActive =
+                    new Date(
+                        user.premium_expires_at
+                    ).getTime() >
+                    Date.now();
+            }
+
+            res.json({
+
+                success: true,
+
+                user: {
+
+                    id:
+                        Number(user.id),
+
+                    username:
+                        user.username,
+
+                    email:
+                        user.email,
+
+                    premiumActive:
+                        premiumActive,
+
+                    premiumExpiresAt:
+                        user.premium_expires_at,
+
+                    createdAt:
+                        user.created_at
+                }
             });
-        }
 
-        const [users] =
-            await db.query(
-                `
-                SELECT
-                    id,
-                    username,
-                    email,
-                    premium_expires_at,
-                    created_at
-                FROM users
-                WHERE id = ?
-                LIMIT 1
-                `,
-                [userId]
+        } catch (error) {
+
+            console.error(
+                "Get user error:",
+                error
             );
 
-        if (users.length === 0) {
-
-            return res.status(404).json({
+            res.status(500).json({
 
                 success: false,
 
                 message:
-                    "User not found"
+                    "Could not get user"
             });
         }
+    }
+);
 
-        const user =
-            users[0];
+// ==========================================
+// PREMIUM PLANS
+// ==========================================
 
-        let premiumActive = false;
+app.get(
+    "/api/premium/plans",
+    (req, res) => {
 
-        if (user.premium_expires_at) {
+        const plans =
+            Object.entries(
+                PREMIUM_PLANS
+            ).map(
+                ([id, plan]) => ({
 
-            premiumActive =
-                new Date(
-                    user.premium_expires_at
-                ).getTime() >
-                Date.now();
-        }
+                    id:
+                        id,
+
+                    name:
+                        plan.name,
+
+                    days:
+                        plan.days,
+
+                    priceToman:
+                        plan.priceToman
+                })
+            );
 
         res.json({
 
             success: true,
 
-            user: {
-
-                id:
-                    Number(user.id),
-
-                username:
-                    user.username,
-
-                email:
-                    user.email,
-
-                premiumActive:
-                    premiumActive,
-
-                premiumExpiresAt:
-                    user.premium_expires_at,
-
-                createdAt:
-                    user.created_at
-            }
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Get user error:",
-            error
-        );
-
-        res.status(500).json({
-
-            success: false,
-
-            message:
-                "Could not get user"
+            plans:
+                plans
         });
     }
-});
+);
 
 // ==========================================
-// Get Premium Plans
-// ==========================================
-
-app.get("/api/premium/plans", (req, res) => {
-
-    const plans =
-        Object.entries(
-            PREMIUM_PLANS
-        ).map(
-            ([id, plan]) => ({
-
-                id: id,
-
-                name:
-                    plan.name,
-
-                days:
-                    plan.days,
-
-                priceToman:
-                    plan.priceToman
-            })
-        );
-
-    res.json({
-
-        success: true,
-
-        plans: plans
-    });
-});
-
-// ==========================================
-// Create Premium Order
-// ==========================================
-//
-// Android sends:
-//
-// {
-//     "userId": 1,
-//     "plan": "monthly"
-// }
-//
-// مبلغ از Android دریافت نمی‌شود.
-// سرور خودش مبلغ صحیح پلن را تعیین می‌کند.
+// CREATE PREMIUM ORDER
 // ==========================================
 
 app.post(
@@ -767,6 +1005,10 @@ app.post(
                     req.body.plan || ""
                 ).trim();
 
+            // ----------------------------------
+            // Validate user
+            // ----------------------------------
+
             if (
                 !Number.isInteger(userId) ||
                 userId <= 0
@@ -780,6 +1022,10 @@ app.post(
                         "Invalid userId"
                 });
             }
+
+            // ----------------------------------
+            // Validate plan
+            // ----------------------------------
 
             const selectedPlan =
                 PREMIUM_PLANS[planId];
@@ -795,9 +1041,9 @@ app.post(
                 });
             }
 
-            // ------------------------------
+            // ----------------------------------
             // Check user
-            // ------------------------------
+            // ----------------------------------
 
             const [users] =
                 await connection.query(
@@ -823,17 +1069,16 @@ app.post(
                 });
             }
 
-            // ------------------------------
+            // ----------------------------------
             // Toman -> Rial
-            // ------------------------------
+            // ----------------------------------
 
             const amountRial =
-                selectedPlan.priceToman *
-                10;
+                selectedPlan.priceToman * 10;
 
-            // ------------------------------
+            // ----------------------------------
             // Create order
-            // ------------------------------
+            // ----------------------------------
 
             const [result] =
                 await connection.query(
@@ -915,7 +1160,7 @@ app.post(
 );
 
 // ==========================================
-// Get Order Status
+// GET ORDER STATUS
 // ==========================================
 
 app.get(
@@ -1025,7 +1270,7 @@ app.get(
 );
 
 // ==========================================
-// Cancel Pending Order
+// CANCEL PENDING ORDER
 // ==========================================
 
 app.post(
@@ -1117,7 +1362,7 @@ app.use((req, res) => {
 });
 
 // ==========================================
-// Server Start
+// SERVER START
 // ==========================================
 
 const PORT =

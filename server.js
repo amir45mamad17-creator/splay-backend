@@ -86,9 +86,9 @@ function generateOrderId() {
 
     return (
         Date.now().toString() +
-        Math.floor(Math.random() * 1000)
+        Math.floor(Math.random() * 100000)
             .toString()
-            .padStart(3, "0")
+            .padStart(5, "0")
     );
 
 }
@@ -172,6 +172,10 @@ async function ensureColumn(
 
 async function ensureUsersTable() {
 
+    console.log(
+        "Checking users table..."
+    );
+
     await pool.query(`
         CREATE TABLE IF NOT EXISTS users (
             id INT NOT NULL AUTO_INCREMENT,
@@ -221,6 +225,10 @@ async function ensureUsersTable() {
         "DATETIME NULL"
     );
 
+    console.log(
+        "Users table is ready."
+    );
+
 }
 
 /* =========================================================
@@ -230,7 +238,15 @@ async function ensureUsersTable() {
 async function ensureOrdersTable() {
 
     console.log(
+        "================================="
+    );
+
+    console.log(
         "Checking orders table..."
+    );
+
+    console.log(
+        "================================="
     );
 
     await pool.query(`
@@ -253,9 +269,9 @@ async function ensureOrdersTable() {
         )
     `);
 
-    /* -----------------------------------------------------
-       Make sure all required columns exist
-    ----------------------------------------------------- */
+    /*
+     * Create any missing columns first.
+     */
 
     await ensureColumn(
         "orders",
@@ -335,20 +351,40 @@ async function ensureOrdersTable() {
         "DATETIME NULL"
     );
 
-    /* =====================================================
-       IMPORTANT FIX
-
-       The old status column may already exist as ENUM
-       or another incompatible type.
-
-       Therefore ensureColumn() is not enough.
-
-       We explicitly convert status to VARCHAR(30).
-    ===================================================== */
+    /*
+     * =====================================================
+     * IMPORTANT
+     *
+     * Old versions of the database may have created these
+     * columns with incompatible types.
+     *
+     * We normalize every column used by SPlay payments.
+     * =====================================================
+     */
 
     console.log(
-        "Fixing orders.status column type..."
+        "Normalizing orders table..."
     );
+
+    await pool.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN order_id VARCHAR(100) NULL
+    `);
+
+    await pool.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN user_id INT NULL
+    `);
+
+    await pool.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN plan_id VARCHAR(50) NULL
+    `);
+
+    await pool.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN amount INT NULL
+    `);
 
     await pool.query(`
         ALTER TABLE orders
@@ -357,8 +393,48 @@ async function ensureOrdersTable() {
         DEFAULT 'CREATED'
     `);
 
+    await pool.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN ref_id VARCHAR(255) NULL
+    `);
+
+    await pool.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN sale_order_id VARCHAR(255) NULL
+    `);
+
+    await pool.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN sale_reference_id VARCHAR(255) NULL
+    `);
+
+    await pool.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN response_code VARCHAR(50) NULL
+    `);
+
+    await pool.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN paid_at DATETIME NULL
+    `);
+
+    await pool.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN premium_expires_at DATETIME NULL
+    `);
+
+    await pool.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN created_at DATETIME NULL
+    `);
+
+    await pool.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN updated_at DATETIME NULL
+    `);
+
     console.log(
-        "orders.status is ready as VARCHAR(30)."
+        "orders table normalization completed."
     );
 
 }
@@ -386,7 +462,15 @@ async function initializeDatabase() {
     await ensureOrdersTable();
 
     console.log(
+        "================================="
+    );
+
+    console.log(
         "Database initialization completed."
+    );
+
+    console.log(
+        "================================="
     );
 
 }
@@ -428,7 +512,10 @@ app.get(
 
                 status: "ERROR",
 
-                database: "DISCONNECTED"
+                database: "DISCONNECTED",
+
+                error:
+                    error.message || ""
 
             });
 
@@ -479,7 +566,16 @@ app.get(
                     "MySQL connection failed",
 
                 error:
-                    error.message
+                    error.message || "",
+
+                code:
+                    error.code || "",
+
+                errno:
+                    error.errno || "",
+
+                sqlState:
+                    error.sqlState || ""
 
             });
 
@@ -500,18 +596,6 @@ app.post(
 
         try {
 
-            console.log(
-                "================================="
-            );
-
-            console.log(
-                "REGISTER REQUEST RECEIVED"
-            );
-
-            console.log(
-                "================================="
-            );
-
             await ensureUsersTable();
 
             const username =
@@ -530,16 +614,6 @@ app.post(
                 String(
                     req.body.password || ""
                 );
-
-            console.log(
-                "Register username:",
-                username
-            );
-
-            console.log(
-                "Register email:",
-                email
-            );
 
             if (!username) {
 
@@ -705,23 +779,6 @@ app.post(
 
             await connection.commit();
 
-            console.log(
-                "================================="
-            );
-
-            console.log(
-                "REGISTER SUCCESS"
-            );
-
-            console.log(
-                "User ID:",
-                result.insertId
-            );
-
-            console.log(
-                "================================="
-            );
-
             return res.status(201).json({
 
                 success: true,
@@ -745,35 +802,8 @@ app.post(
             }
 
             console.error(
-                "================================="
-            );
-
-            console.error(
-                "REGISTER ERROR"
-            );
-
-            console.error(
-                "Message:",
-                error.message
-            );
-
-            console.error(
-                "Code:",
-                error.code
-            );
-
-            console.error(
-                "Errno:",
-                error.errno
-            );
-
-            console.error(
-                "SQL State:",
-                error.sqlState
-            );
-
-            console.error(
-                "================================="
+                "REGISTER ERROR:",
+                error
             );
 
             return res.status(500).json({
@@ -891,7 +921,7 @@ app.post(
             const user =
                 rows[0];
 
-            res.json({
+            return res.json({
 
                 success: true,
 
@@ -919,7 +949,7 @@ app.post(
                 error
             );
 
-            res.status(500).json({
+            return res.status(500).json({
 
                 success: false,
 
@@ -927,7 +957,7 @@ app.post(
                     "Could not login",
 
                 error:
-                    error.message
+                    error.message || ""
 
             });
 
@@ -1002,7 +1032,7 @@ app.get(
 
             }
 
-            res.json({
+            return res.json({
 
                 success: true,
 
@@ -1018,7 +1048,7 @@ app.get(
                 error
             );
 
-            res.status(500).json({
+            return res.status(500).json({
 
                 success: false,
 
@@ -1026,7 +1056,7 @@ app.get(
                     "Could not get user",
 
                 error:
-                    error.message
+                    error.message || ""
 
             });
 
@@ -1043,7 +1073,7 @@ app.get(
     "/api/premium/plans",
     (req, res) => {
 
-        res.json({
+        return res.json({
 
             success: true,
 
@@ -1136,7 +1166,7 @@ app.get(
 
             }
 
-            res.json({
+            return res.json({
 
                 success: true,
 
@@ -1155,7 +1185,7 @@ app.get(
                 error
             );
 
-            res.status(500).json({
+            return res.status(500).json({
 
                 success: false,
 
@@ -1163,7 +1193,7 @@ app.get(
                     "Could not get premium status",
 
                 error:
-                    error.message
+                    error.message || ""
 
             });
 
@@ -1297,39 +1327,46 @@ app.post(
             );
 
             /*
-             * Explicitly use CREATED.
-             * status column has already been
-             * converted to VARCHAR(30).
+             * First insert only the absolutely required
+             * payment fields.
+             *
+             * This avoids problems caused by legacy
+             * columns in the old database.
              */
 
-            await pool.query(
-                `
-                INSERT INTO orders
-                (
-                    order_id,
-                    user_id,
-                    plan_id,
-                    amount,
-                    status,
-                    created_at,
-                    updated_at
-                )
-                VALUES
-                (?, ?, ?, ?, ?, ?, ?)
-                `,
-                [
-                    orderId,
-                    userId,
-                    planId,
-                    plan.amountRial,
-                    "CREATED",
-                    now,
-                    now
-                ]
-            );
+            const [result] =
+                await pool.query(
+                    `
+                    INSERT INTO orders
+                    (
+                        order_id,
+                        user_id,
+                        plan_id,
+                        amount,
+                        status,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES
+                    (?, ?, ?, ?, 'CREATED', ?, ?)
+                    `,
+                    [
+                        orderId,
+                        userId,
+                        planId,
+                        plan.amountRial,
+                        now,
+                        now
+                    ]
+                );
 
             console.log(
                 "ORDER CREATED SUCCESSFULLY"
+            );
+
+            console.log(
+                "Database ID:",
+                result.insertId
             );
 
             console.log(
@@ -1396,6 +1433,11 @@ app.post(
             );
 
             console.error(
+                "SQL Message:",
+                error.sqlMessage
+            );
+
+            console.error(
                 "================================="
             );
 
@@ -1416,7 +1458,10 @@ app.post(
                     error.errno || "",
 
                 sqlState:
-                    error.sqlState || ""
+                    error.sqlState || "",
+
+                sqlMessage:
+                    error.sqlMessage || ""
 
             });
 
@@ -1467,9 +1512,11 @@ app.get(
                         ref_id,
                         sale_order_id,
                         sale_reference_id,
+                        response_code,
                         paid_at,
                         premium_expires_at,
-                        created_at
+                        created_at,
+                        updated_at
                     FROM orders
                     WHERE order_id = ?
                     LIMIT 1
@@ -1494,7 +1541,7 @@ app.get(
 
             }
 
-            res.json({
+            return res.json({
 
                 success: true,
 
@@ -1510,7 +1557,7 @@ app.get(
                 error
             );
 
-            res.status(500).json({
+            return res.status(500).json({
 
                 success: false,
 
@@ -1518,7 +1565,16 @@ app.get(
                     "Could not get order status",
 
                 error:
-                    error.message
+                    error.message || "",
+
+                code:
+                    error.code || "",
+
+                errno:
+                    error.errno || "",
+
+                sqlState:
+                    error.sqlState || ""
 
             });
 
@@ -1572,7 +1628,7 @@ app.post(
                 ]
             );
 
-            res.json({
+            return res.json({
 
                 success: true,
 
@@ -1588,7 +1644,7 @@ app.post(
                 error
             );
 
-            res.status(500).json({
+            return res.status(500).json({
 
                 success: false,
 
@@ -1596,7 +1652,16 @@ app.post(
                     "Could not cancel payment",
 
                 error:
-                    error.message
+                    error.message || "",
+
+                code:
+                    error.code || "",
+
+                errno:
+                    error.errno || "",
+
+                sqlState:
+                    error.sqlState || ""
 
             });
 
@@ -1646,7 +1711,10 @@ app.use(
             success: false,
 
             message:
-                "Internal server error"
+                "Internal server error",
+
+            error:
+                error.message || ""
 
         });
 

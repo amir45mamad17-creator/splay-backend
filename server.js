@@ -34,6 +34,7 @@ const pool = mysql.createPool({
 ========================================================= */
 
 const PREMIUM_PLANS = {
+
     monthly: {
         id: "monthly",
         title: "ماهانه",
@@ -65,6 +66,7 @@ const PREMIUM_PLANS = {
         amountToman: 1299000,
         amountRial: 12990000
     }
+
 };
 
 /* =========================================================
@@ -72,32 +74,45 @@ const PREMIUM_PLANS = {
 ========================================================= */
 
 function hashPassword(password) {
+
     return crypto
         .createHash("sha256")
         .update(password)
         .digest("hex");
+
 }
 
 function generateOrderId() {
+
     return (
         Date.now().toString() +
         Math.floor(Math.random() * 1000)
             .toString()
             .padStart(3, "0")
     );
+
 }
 
 function addDays(date, days) {
+
     const result = new Date(date);
-    result.setDate(result.getDate() + days);
+
+    result.setDate(
+        result.getDate() + days
+    );
+
     return result;
+
 }
 
 /* =========================================================
    DATABASE HELPERS
 ========================================================= */
 
-async function columnExists(tableName, columnName) {
+async function columnExists(
+    tableName,
+    columnName
+) {
 
     const [rows] =
         await pool.query(
@@ -115,6 +130,7 @@ async function columnExists(tableName, columnName) {
         );
 
     return Number(rows[0].count) > 0;
+
 }
 
 async function ensureColumn(
@@ -132,18 +148,22 @@ async function ensureColumn(
     if (!exists) {
 
         console.log(
-            `Column ${tableName}.${columnName} is missing. Creating it...`
+            `Creating missing column ${tableName}.${columnName}...`
         );
 
         await pool.query(
-            `ALTER TABLE \`${tableName}\`
-             ADD COLUMN \`${columnName}\` ${definition}`
+            `
+            ALTER TABLE \`${tableName}\`
+            ADD COLUMN \`${columnName}\` ${definition}
+            `
         );
 
         console.log(
             `Column ${tableName}.${columnName} created.`
         );
+
     }
+
 }
 
 /* =========================================================
@@ -200,6 +220,7 @@ async function ensureUsersTable() {
         "updated_at",
         "DATETIME NULL"
     );
+
 }
 
 /* =========================================================
@@ -207,6 +228,10 @@ async function ensureUsersTable() {
 ========================================================= */
 
 async function ensureOrdersTable() {
+
+    console.log(
+        "Checking orders table..."
+    );
 
     await pool.query(`
         CREATE TABLE IF NOT EXISTS orders (
@@ -227,6 +252,10 @@ async function ensureOrdersTable() {
             PRIMARY KEY (id)
         )
     `);
+
+    /* -----------------------------------------------------
+       Make sure all required columns exist
+    ----------------------------------------------------- */
 
     await ensureColumn(
         "orders",
@@ -256,33 +285,6 @@ async function ensureOrdersTable() {
         "orders",
         "status",
         "VARCHAR(30) NULL DEFAULT 'CREATED'"
-    );
-
-    /*
-     * IMPORTANT:
-     *
-     * The existing database may have the status column
-     * as ENUM or another incompatible type.
-     *
-     * CREATE TABLE IF NOT EXISTS does NOT change an
-     * existing column.
-     *
-     * Therefore we explicitly convert status to VARCHAR.
-     */
-    console.log(
-        "Ensuring orders.status uses VARCHAR..."
-    );
-
-    await pool.query(`
-        ALTER TABLE orders
-        MODIFY COLUMN status
-        VARCHAR(30)
-        NULL
-        DEFAULT 'CREATED'
-    `);
-
-    console.log(
-        "orders.status is ready."
     );
 
     await ensureColumn(
@@ -332,6 +334,33 @@ async function ensureOrdersTable() {
         "updated_at",
         "DATETIME NULL"
     );
+
+    /* =====================================================
+       IMPORTANT FIX
+
+       The old status column may already exist as ENUM
+       or another incompatible type.
+
+       Therefore ensureColumn() is not enough.
+
+       We explicitly convert status to VARCHAR(30).
+    ===================================================== */
+
+    console.log(
+        "Fixing orders.status column type..."
+    );
+
+    await pool.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN status VARCHAR(30)
+        NULL
+        DEFAULT 'CREATED'
+    `);
+
+    console.log(
+        "orders.status is ready as VARCHAR(30)."
+    );
+
 }
 
 /* =========================================================
@@ -340,9 +369,17 @@ async function ensureOrdersTable() {
 
 async function initializeDatabase() {
 
-    console.log("=================================");
-    console.log("SPlay database initialization...");
-    console.log("=================================");
+    console.log(
+        "================================="
+    );
+
+    console.log(
+        "SPlay database initialization..."
+    );
+
+    console.log(
+        "================================="
+    );
 
     await ensureUsersTable();
 
@@ -351,40 +388,54 @@ async function initializeDatabase() {
     console.log(
         "Database initialization completed."
     );
+
 }
 
 /* =========================================================
    HEALTH
 ========================================================= */
 
-app.get("/health", async (req, res) => {
+app.get(
+    "/health",
+    async (req, res) => {
 
-    try {
+        try {
 
-        await pool.query(
-            "SELECT 1"
-        );
+            await pool.query(
+                "SELECT 1"
+            );
 
-        res.json({
-            success: true,
-            status: "OK",
-            database: "CONNECTED"
-        });
+            res.json({
 
-    } catch (error) {
+                success: true,
 
-        console.error(
-            "HEALTH ERROR:",
-            error
-        );
+                status: "OK",
 
-        res.status(500).json({
-            success: false,
-            status: "ERROR",
-            database: "DISCONNECTED"
-        });
+                database: "CONNECTED"
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "HEALTH ERROR:",
+                error
+            );
+
+            res.status(500).json({
+
+                success: false,
+
+                status: "ERROR",
+
+                database: "DISCONNECTED"
+
+            });
+
+        }
+
     }
-});
+);
 
 /* =========================================================
    DATABASE TEST
@@ -402,11 +453,15 @@ app.get(
                 );
 
             res.json({
+
                 success: true,
+
                 message:
                     "MySQL connection successful",
+
                 serverTime:
                     rows[0].serverTime
+
             });
 
         } catch (error) {
@@ -417,13 +472,19 @@ app.get(
             );
 
             res.status(500).json({
+
                 success: false,
+
                 message:
                     "MySQL connection failed",
+
                 error:
                     error.message
+
             });
+
         }
+
     }
 );
 
@@ -462,8 +523,8 @@ app.post(
                 String(
                     req.body.email || ""
                 )
-                    .trim()
-                    .toLowerCase();
+                .trim()
+                .toLowerCase();
 
             const password =
                 String(
@@ -483,46 +544,66 @@ app.post(
             if (!username) {
 
                 return res.status(400).json({
+
                     success: false,
+
                     message:
                         "Username is required"
+
                 });
+
             }
 
             if (!email) {
 
                 return res.status(400).json({
+
                     success: false,
+
                     message:
                         "Email is required"
+
                 });
+
             }
 
             if (!password) {
 
                 return res.status(400).json({
+
                     success: false,
+
                     message:
                         "Password is required"
+
                 });
+
             }
 
             if (username.length < 3) {
 
                 return res.status(400).json({
+
                     success: false,
+
                     message:
                         "Username must be at least 3 characters"
+
                 });
+
             }
 
             if (password.length < 6) {
 
                 return res.status(400).json({
+
                     success: false,
+
                     message:
                         "Password must be at least 6 characters"
+
                 });
+
             }
 
             connection =
@@ -538,7 +619,9 @@ app.post(
                     WHERE username = ?
                     LIMIT 1
                     `,
-                    [username]
+                    [
+                        username
+                    ]
                 );
 
             if (
@@ -548,10 +631,14 @@ app.post(
                 await connection.rollback();
 
                 return res.status(409).json({
+
                     success: false,
+
                     message:
                         "Username already exists"
+
                 });
+
             }
 
             const [emailRows] =
@@ -562,7 +649,9 @@ app.post(
                     WHERE email = ?
                     LIMIT 1
                     `,
-                    [email]
+                    [
+                        email
+                    ]
                 );
 
             if (
@@ -572,10 +661,14 @@ app.post(
                 await connection.rollback();
 
                 return res.status(409).json({
+
                     success: false,
+
                     message:
                         "Email already exists"
+
                 });
+
             }
 
             const passwordHash =
@@ -648,6 +741,7 @@ app.post(
                 try {
                     await connection.rollback();
                 } catch (_) {}
+
             }
 
             console.error(
@@ -708,7 +802,9 @@ app.post(
             if (connection) {
                 connection.release();
             }
+
         }
+
     }
 );
 
@@ -728,8 +824,8 @@ app.post(
                 String(
                     req.body.email || ""
                 )
-                    .trim()
-                    .toLowerCase();
+                .trim()
+                .toLowerCase();
 
             const password =
                 String(
@@ -742,10 +838,14 @@ app.post(
             ) {
 
                 return res.status(400).json({
+
                     success: false,
+
                     message:
                         "Email and password are required"
+
                 });
+
             }
 
             const passwordHash =
@@ -778,10 +878,14 @@ app.post(
             ) {
 
                 return res.status(401).json({
+
                     success: false,
+
                     message:
                         "Invalid email or password"
+
                 });
+
             }
 
             const user =
@@ -826,7 +930,9 @@ app.post(
                     error.message
 
             });
+
         }
+
     }
 );
 
@@ -853,10 +959,14 @@ app.get(
             ) {
 
                 return res.status(400).json({
+
                     success: false,
+
                     message:
                         "Invalid user ID"
+
                 });
+
             }
 
             const [rows] =
@@ -872,7 +982,9 @@ app.get(
                     WHERE id = ?
                     LIMIT 1
                     `,
-                    [userId]
+                    [
+                        userId
+                    ]
                 );
 
             if (
@@ -880,16 +992,23 @@ app.get(
             ) {
 
                 return res.status(404).json({
+
                     success: false,
+
                     message:
                         "User not found"
+
                 });
+
             }
 
             res.json({
+
                 success: true,
+
                 user:
                     rows[0]
+
             });
 
         } catch (error) {
@@ -900,13 +1019,19 @@ app.get(
             );
 
             res.status(500).json({
+
                 success: false,
+
                 message:
                     "Could not get user",
+
                 error:
                     error.message
+
             });
+
         }
+
     }
 );
 
@@ -955,10 +1080,14 @@ app.get(
             ) {
 
                 return res.status(400).json({
+
                     success: false,
+
                     message:
                         "Invalid user ID"
+
                 });
+
             }
 
             const [rows] =
@@ -971,7 +1100,9 @@ app.get(
                     WHERE id = ?
                     LIMIT 1
                     `,
-                    [userId]
+                    [
+                        userId
+                    ]
                 );
 
             if (
@@ -979,10 +1110,14 @@ app.get(
             ) {
 
                 return res.status(404).json({
+
                     success: false,
+
                     message:
                         "User not found"
+
                 });
+
             }
 
             const expiry =
@@ -993,9 +1128,12 @@ app.get(
             if (expiry) {
 
                 active =
-                    new Date(expiry).getTime()
+                    new Date(
+                        expiry
+                    ).getTime()
                     >
                     Date.now();
+
             }
 
             res.json({
@@ -1028,7 +1166,9 @@ app.get(
                     error.message
 
             });
+
         }
+
     }
 );
 
@@ -1041,6 +1181,18 @@ app.post(
     async (req, res) => {
 
         try {
+
+            console.log(
+                "================================="
+            );
+
+            console.log(
+                "CREATE ORDER REQUEST"
+            );
+
+            console.log(
+                "================================="
+            );
 
             await ensureUsersTable();
 
@@ -1056,16 +1208,30 @@ app.post(
                     req.body.planId || ""
                 ).trim();
 
+            console.log(
+                "User ID:",
+                userId
+            );
+
+            console.log(
+                "Plan ID:",
+                planId
+            );
+
             if (
                 !Number.isInteger(userId) ||
                 userId <= 0
             ) {
 
                 return res.status(400).json({
+
                     success: false,
+
                     message:
                         "Invalid user ID"
+
                 });
+
             }
 
             const plan =
@@ -1076,10 +1242,14 @@ app.post(
             if (!plan) {
 
                 return res.status(400).json({
+
                     success: false,
+
                     message:
                         "Invalid premium plan"
+
                 });
+
             }
 
             const [users] =
@@ -1090,7 +1260,9 @@ app.post(
                     WHERE id = ?
                     LIMIT 1
                     `,
-                    [userId]
+                    [
+                        userId
+                    ]
                 );
 
             if (
@@ -1098,10 +1270,14 @@ app.post(
             ) {
 
                 return res.status(404).json({
+
                     success: false,
+
                     message:
                         "User not found"
+
                 });
+
             }
 
             const orderId =
@@ -1109,6 +1285,22 @@ app.post(
 
             const now =
                 new Date();
+
+            console.log(
+                "Generated Order ID:",
+                orderId
+            );
+
+            console.log(
+                "Amount Rial:",
+                plan.amountRial
+            );
+
+            /*
+             * Explicitly use CREATED.
+             * status column has already been
+             * converted to VARCHAR(30).
+             */
 
             await pool.query(
                 `
@@ -1123,32 +1315,21 @@ app.post(
                     updated_at
                 )
                 VALUES
-                (
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    'CREATED',
-                    ?,
-                    ?
-                )
+                (?, ?, ?, ?, ?, ?, ?)
                 `,
                 [
                     orderId,
                     userId,
                     planId,
                     plan.amountRial,
+                    "CREATED",
                     now,
                     now
                 ]
             );
 
             console.log(
-                "================================="
-            );
-
-            console.log(
-                "ORDER CREATED"
+                "ORDER CREATED SUCCESSFULLY"
             );
 
             console.log(
@@ -1157,25 +1338,10 @@ app.post(
             );
 
             console.log(
-                "User ID:",
-                userId
-            );
-
-            console.log(
-                "Plan:",
-                planId
-            );
-
-            console.log(
-                "Amount Rial:",
-                plan.amountRial
-            );
-
-            console.log(
                 "================================="
             );
 
-            res.json({
+            return res.json({
 
                 success: true,
 
@@ -1233,7 +1399,7 @@ app.post(
                 "================================="
             );
 
-            res.status(500).json({
+            return res.status(500).json({
 
                 success: false,
 
@@ -1241,7 +1407,7 @@ app.post(
                     "Could not create order",
 
                 error:
-                    error.message,
+                    error.message || "",
 
                 code:
                     error.code || "",
@@ -1253,7 +1419,9 @@ app.post(
                     error.sqlState || ""
 
             });
+
         }
+
     }
 );
 
@@ -1277,10 +1445,14 @@ app.get(
             if (!orderId) {
 
                 return res.status(400).json({
+
                     success: false,
+
                     message:
                         "Order ID is required"
+
                 });
+
             }
 
             const [rows] =
@@ -1302,7 +1474,9 @@ app.get(
                     WHERE order_id = ?
                     LIMIT 1
                     `,
-                    [orderId]
+                    [
+                        orderId
+                    ]
                 );
 
             if (
@@ -1310,10 +1484,14 @@ app.get(
             ) {
 
                 return res.status(404).json({
+
                     success: false,
+
                     message:
                         "Order not found"
+
                 });
+
             }
 
             res.json({
@@ -1343,7 +1521,9 @@ app.get(
                     error.message
 
             });
+
         }
+
     }
 );
 
@@ -1367,10 +1547,14 @@ app.post(
             if (!orderId) {
 
                 return res.status(400).json({
+
                     success: false,
+
                     message:
                         "Order ID is required"
+
                 });
+
             }
 
             await pool.query(
@@ -1415,7 +1599,9 @@ app.post(
                     error.message
 
             });
+
         }
+
     }
 );
 
@@ -1443,7 +1629,12 @@ app.use(
 ========================================================= */
 
 app.use(
-    (error, req, res, next) => {
+    (
+        error,
+        req,
+        res,
+        next
+    ) => {
 
         console.error(
             "GLOBAL ERROR:",
@@ -1491,7 +1682,9 @@ async function startServer() {
         );
 
         process.exit(1);
+
     }
+
 }
 
 startServer();

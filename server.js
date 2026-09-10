@@ -4,24 +4,52 @@ const crypto = require("crypto");
 
 const app = express();
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+/* =========================================================
+BASIC APP SETTINGS
+========================================================= */
 
-const PORT = process.env.PORT || 10000;
+app.use(
+    express.json({
+        limit: "8mb"
+    })
+);
+
+app.use(
+    express.urlencoded({
+        extended: true,
+        limit: "8mb"
+    })
+);
+
+const PORT =
+    process.env.PORT || 10000;
+
+/* =========================================================
+DATABASE
+========================================================= */
 
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT || 3306),
+    port: Number(
+        process.env.DB_PORT || 3306
+    ),
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME || "defaultdb",
+    database:
+        process.env.DB_NAME || "defaultdb",
+
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
+
     ssl: {
         rejectUnauthorized: false
     }
 });
+
+/* =========================================================
+PREMIUM PLANS
+========================================================= */
 
 const PREMIUM_PLANS = {
     monthly: {
@@ -30,18 +58,21 @@ const PREMIUM_PLANS = {
         toman: 199000,
         rial: 1990000
     },
+
     three_month: {
         name: "سه‌ماهه",
         days: 90,
         toman: 499000,
         rial: 4990000
     },
+
     six_month: {
         name: "شش‌ماهه",
         days: 180,
         toman: 799000,
         rial: 7990000
     },
+
     yearly: {
         name: "یک‌ساله",
         days: 365,
@@ -51,7 +82,7 @@ const PREMIUM_PLANS = {
 };
 
 /* =========================================================
-   BASIC HELPERS
+BASIC HELPERS
 ========================================================= */
 
 function hashPassword(password) {
@@ -65,27 +96,38 @@ function generateOrderId() {
     return (
         "SPL" +
         Date.now().toString() +
-        Math.floor(1000 + Math.random() * 9000)
+        Math.floor(
+            1000 + Math.random() * 9000
+        )
     );
 }
 
 function addDays(date, days) {
     const result = new Date(date);
-    result.setDate(result.getDate() + days);
+    result.setDate(
+        result.getDate() + days
+    );
     return result;
 }
 
 function isValidId(value) {
     const id = Number(value);
-    return Number.isInteger(id) && id > 0;
+
+    return (
+        Number.isInteger(id) &&
+        id > 0
+    );
 }
 
 function normalizeEmail(email) {
-    return String(email || "").trim().toLowerCase();
+    return String(email || "")
+        .trim()
+        .toLowerCase();
 }
 
 function normalizeUsername(username) {
-    return String(username || "").trim();
+    return String(username || "")
+        .trim();
 }
 
 function parseBoolean(value) {
@@ -125,15 +167,112 @@ function isPremiumDateActive(expiry) {
 }
 
 /* =========================================================
-   ADMIN TOKEN
+AVATAR HELPERS
+========================================================= */
+
+/*
+Supported formats:
+
+data:image/jpeg;base64,...
+data:image/png;base64,...
+data:image/webp;base64,...
+
+or a normal image URL.
+
+The Android app can send:
+
+{
+    "avatar": "data:image/jpeg;base64,..."
+}
+
+*/
+
+function isValidAvatar(value) {
+    if (!value) {
+        return false;
+    }
+
+    const avatar =
+        String(value).trim();
+
+    if (
+        avatar.startsWith(
+            "https://"
+        ) ||
+        avatar.startsWith(
+            "http://"
+        )
+    ) {
+        return true;
+    }
+
+    return (
+        avatar.startsWith(
+            "data:image/jpeg;base64,"
+        ) ||
+        avatar.startsWith(
+            "data:image/jpg;base64,"
+        ) ||
+        avatar.startsWith(
+            "data:image/png;base64,"
+        ) ||
+        avatar.startsWith(
+            "data:image/webp;base64,"
+        )
+    );
+}
+
+function avatarSizeInBytes(value) {
+    const avatar =
+        String(value || "");
+
+    if (
+        !avatar.startsWith(
+            "data:"
+        )
+    ) {
+        return 0;
+    }
+
+    const commaIndex =
+        avatar.indexOf(",");
+
+    if (commaIndex === -1) {
+        return 0;
+    }
+
+    const base64 =
+        avatar.substring(
+            commaIndex + 1
+        );
+
+    return Math.floor(
+        (base64.length * 3) / 4
+    );
+}
+
+function cleanAvatarUrl(value) {
+    if (!value) {
+        return "";
+    }
+
+    return String(value).trim();
+}
+
+/* =========================================================
+ADMIN TOKEN
 ========================================================= */
 
 function getAdminTokenSecret() {
-    return process.env.ADMIN_TOKEN_SECRET || "";
+    return (
+        process.env.ADMIN_TOKEN_SECRET ||
+        ""
+    );
 }
 
 function createAdminToken() {
-    const secret = getAdminTokenSecret();
+    const secret =
+        getAdminTokenSecret();
 
     if (!secret) {
         throw new Error(
@@ -143,21 +282,34 @@ function createAdminToken() {
 
     const payload = {
         role: "admin",
-        exp: Date.now() + 24 * 60 * 60 * 1000
+        exp:
+            Date.now() +
+            24 * 60 * 60 * 1000
     };
 
     const encodedPayload =
         Buffer
-            .from(JSON.stringify(payload))
+            .from(
+                JSON.stringify(payload)
+            )
             .toString("base64url");
 
     const signature =
         crypto
-            .createHmac("sha256", secret)
-            .update(encodedPayload)
+            .createHmac(
+                "sha256",
+                secret
+            )
+            .update(
+                encodedPayload
+            )
             .digest("base64url");
 
-    return `${encodedPayload}.${signature}`;
+    return (
+        encodedPayload +
+        "." +
+        signature
+    );
 }
 
 function verifyAdminToken(token) {
@@ -188,7 +340,9 @@ function verifyAdminToken(token) {
                     "sha256",
                     secret
                 )
-                .update(encodedPayload)
+                .update(
+                    encodedPayload
+                )
                 .digest("base64url");
 
         if (
@@ -241,9 +395,14 @@ function verifyAdminToken(token) {
     }
 }
 
-function requireAdmin(req, res, next) {
+function requireAdmin(
+    req,
+    res,
+    next
+) {
     const authHeader =
-        req.headers.authorization || "";
+        req.headers.authorization ||
+        "";
 
     if (
         !authHeader.startsWith(
@@ -274,7 +433,7 @@ function requireAdmin(req, res, next) {
 }
 
 /* =========================================================
-   DATABASE HELPERS
+DATABASE HELPERS
 ========================================================= */
 
 async function columnExists(
@@ -297,7 +456,9 @@ async function columnExists(
         );
 
     return (
-        Number(rows[0].count) > 0
+        Number(
+            rows[0].count
+        ) > 0
     );
 }
 
@@ -350,8 +511,7 @@ async function removeOrdersUserForeignKey() {
                 await pool.query(
                     `
                     ALTER TABLE orders
-                    DROP FOREIGN KEY
-                    \`${row.CONSTRAINT_NAME}\`
+                    DROP FOREIGN KEY \`${row.CONSTRAINT_NAME}\`
                     `
                 );
 
@@ -374,7 +534,7 @@ async function removeOrdersUserForeignKey() {
 }
 
 /* =========================================================
-   USERS TABLE
+USERS TABLE
 ========================================================= */
 
 async function ensureUsersTable() {
@@ -384,12 +544,14 @@ async function ensureUsersTable() {
 
     await removeOrdersUserForeignKey();
 
-    await pool.query(`
+    await pool.query(
+        `
         CREATE TABLE IF NOT EXISTS users (
             id INT NOT NULL AUTO_INCREMENT,
             username VARCHAR(100) NULL,
             email VARCHAR(255) NULL,
             password_hash VARCHAR(255) NULL,
+            avatar_url LONGTEXT NULL,
             premium_expires_at DATETIME NULL,
             created_at DATETIME NULL
                 DEFAULT CURRENT_TIMESTAMP,
@@ -398,7 +560,8 @@ async function ensureUsersTable() {
                 ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (id)
         )
-    `);
+        `
+    );
 
     await ensureColumn(
         "users",
@@ -420,6 +583,12 @@ async function ensureUsersTable() {
 
     await ensureColumn(
         "users",
+        "avatar_url",
+        "LONGTEXT NULL"
+    );
+
+    await ensureColumn(
+        "users",
         "premium_expires_at",
         "DATETIME NULL"
     );
@@ -436,11 +605,13 @@ async function ensureUsersTable() {
         "DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
     );
 
-    await pool.query(`
+    await pool.query(
+        `
         ALTER TABLE users
         MODIFY COLUMN id
         INT NOT NULL AUTO_INCREMENT
-    `);
+        `
+    );
 
     console.log(
         "Users table is ready."
@@ -448,7 +619,7 @@ async function ensureUsersTable() {
 }
 
 /* =========================================================
-   ORDERS TABLE
+ORDERS TABLE
 ========================================================= */
 
 async function ensureOrdersTable() {
@@ -456,7 +627,8 @@ async function ensureOrdersTable() {
         "Checking orders table..."
     );
 
-    await pool.query(`
+    await pool.query(
+        `
         CREATE TABLE IF NOT EXISTS orders (
             id INT NOT NULL AUTO_INCREMENT,
             order_id VARCHAR(100) NOT NULL,
@@ -479,14 +651,17 @@ async function ensureOrdersTable() {
             PRIMARY KEY (id),
             UNIQUE KEY unique_order_id (order_id)
         )
-    `);
+        `
+    );
 
     await removeOrdersUserForeignKey();
 
-    await pool.query(`
+    await pool.query(
+        `
         ALTER TABLE orders
         MODIFY COLUMN user_id INT NULL
-    `);
+        `
+    );
 
     await ensureColumn(
         "orders",
@@ -560,45 +735,55 @@ async function ensureOrdersTable() {
         "DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
     );
 
-    await pool.query(`
+    await pool.query(
+        `
         ALTER TABLE orders
         MODIFY COLUMN user_id INT NULL
-    `);
+        `
+    );
 
-    await pool.query(`
+    await pool.query(
+        `
         ALTER TABLE orders
         MODIFY COLUMN order_id
         VARCHAR(100) NOT NULL
-    `);
+        `
+    );
 
-    await pool.query(`
+    await pool.query(
+        `
         ALTER TABLE orders
         MODIFY COLUMN status
         VARCHAR(30) NULL DEFAULT 'CREATED'
-    `);
+        `
+    );
 
     const [existingForeignKeys] =
-        await pool.query(`
+        await pool.query(
+            `
             SELECT CONSTRAINT_NAME
             FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
             WHERE TABLE_SCHEMA = DATABASE()
               AND TABLE_NAME = 'orders'
               AND COLUMN_NAME = 'user_id'
               AND REFERENCED_TABLE_NAME = 'users'
-        `);
+            `
+        );
 
     if (
         existingForeignKeys.length === 0
     ) {
         try {
-            await pool.query(`
+            await pool.query(
+                `
                 ALTER TABLE orders
                 ADD CONSTRAINT fk_orders_user
                 FOREIGN KEY (user_id)
                 REFERENCES users(id)
                 ON DELETE SET NULL
                 ON UPDATE CASCADE
-            `);
+                `
+            );
 
             console.log(
                 "Foreign key fk_orders_user created."
@@ -621,7 +806,7 @@ async function ensureOrdersTable() {
 }
 
 /* =========================================================
-   MOVIES TABLE
+MOVIES TABLE
 ========================================================= */
 
 async function ensureMoviesTable() {
@@ -629,7 +814,8 @@ async function ensureMoviesTable() {
         "Checking movies table..."
     );
 
-    await pool.query(`
+    await pool.query(
+        `
         CREATE TABLE IF NOT EXISTS movies (
             id INT NOT NULL AUTO_INCREMENT,
             title VARCHAR(255) NOT NULL,
@@ -646,7 +832,8 @@ async function ensureMoviesTable() {
                 ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (id)
         )
-    `);
+        `
+    );
 
     await ensureColumn(
         "movies",
@@ -708,7 +895,7 @@ async function ensureMoviesTable() {
 }
 
 /* =========================================================
-   EXPLORE VIDEOS TABLE
+EXPLORE VIDEOS TABLE
 ========================================================= */
 
 async function ensureExploreVideosTable() {
@@ -716,7 +903,8 @@ async function ensureExploreVideosTable() {
         "Checking explore_videos table..."
     );
 
-    await pool.query(`
+    await pool.query(
+        `
         CREATE TABLE IF NOT EXISTS explore_videos (
             id INT NOT NULL AUTO_INCREMENT,
             title VARCHAR(255) NULL,
@@ -733,7 +921,8 @@ async function ensureExploreVideosTable() {
                 ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (id)
         )
-    `);
+        `
+    );
 
     await ensureColumn(
         "explore_videos",
@@ -795,7 +984,7 @@ async function ensureExploreVideosTable() {
 }
 
 /* =========================================================
-   COMMENTS TABLE
+COMMENTS TABLE
 ========================================================= */
 
 async function ensureCommentsTable() {
@@ -803,7 +992,8 @@ async function ensureCommentsTable() {
         "Checking comments table..."
     );
 
-    await pool.query(`
+    await pool.query(
+        `
         CREATE TABLE IF NOT EXISTS comments (
             id INT NOT NULL AUTO_INCREMENT,
             video_id INT NOT NULL,
@@ -818,7 +1008,8 @@ async function ensureCommentsTable() {
             INDEX idx_comments_video_id (video_id),
             INDEX idx_comments_user_id (user_id)
         )
-    `);
+        `
+    );
 
     await ensureColumn(
         "comments",
@@ -856,7 +1047,7 @@ async function ensureCommentsTable() {
 }
 
 /* =========================================================
-   DATABASE INITIALIZATION
+DATABASE INITIALIZATION
 ========================================================= */
 
 async function initializeDatabase() {
@@ -876,7 +1067,7 @@ async function initializeDatabase() {
 }
 
 /* =========================================================
-   HEALTH
+HEALTH
 ========================================================= */
 
 app.get(
@@ -904,7 +1095,7 @@ app.get(
 );
 
 /* =========================================================
-   DATABASE TEST
+DATABASE TEST
 ========================================================= */
 
 app.get(
@@ -928,14 +1119,15 @@ app.get(
                 success: false,
                 message:
                     "MySQL connection failed",
-                error: error.message
+                error:
+                    error.message
             });
         }
     }
 );
 
 /* =========================================================
-   USER REGISTER
+USER REGISTER
 ========================================================= */
 
 app.post(
@@ -1014,11 +1206,13 @@ app.post(
                         username,
                         email,
                         password_hash,
+                        avatar_url,
                         premium_expires_at,
                         created_at,
                         updated_at
                     )
-                    VALUES (?, ?, ?, NULL, NOW(), NOW())
+                    VALUES
+                    (?, ?, ?, NULL, NULL, NOW(), NOW())
                     `,
                     [
                         cleanUsername,
@@ -1036,7 +1230,9 @@ app.post(
                 username:
                     cleanUsername,
                 email:
-                    cleanEmail
+                    cleanEmail,
+                avatarUrl:
+                    ""
             });
         } catch (error) {
             console.error(
@@ -1056,7 +1252,7 @@ app.post(
 );
 
 /* =========================================================
-   USER LOGIN
+USER LOGIN
 ========================================================= */
 
 app.post(
@@ -1096,6 +1292,7 @@ app.post(
                         id,
                         username,
                         email,
+                        avatar_url,
                         premium_expires_at
                     FROM users
                     WHERE email = ?
@@ -1125,12 +1322,20 @@ app.post(
                 success: true,
                 message:
                     "Login successful",
+
                 userId:
                     user.id,
+
                 username:
                     user.username,
+
                 email:
                     user.email,
+
+                avatarUrl:
+                    user.avatar_url ||
+                    "",
+
                 premiumExpiresAt:
                     user.premium_expires_at
             });
@@ -1152,7 +1357,7 @@ app.post(
 );
 
 /* =========================================================
-   USER PROFILE
+USER PROFILE GET
 ========================================================= */
 
 app.get(
@@ -1160,7 +1365,9 @@ app.get(
     async (req, res) => {
         try {
             const userId =
-                Number(req.params.id);
+                Number(
+                    req.params.id
+                );
 
             if (
                 !isValidId(userId)
@@ -1179,8 +1386,10 @@ app.get(
                         id,
                         username,
                         email,
+                        avatar_url,
                         premium_expires_at,
-                        created_at
+                        created_at,
+                        updated_at
                     FROM users
                     WHERE id = ?
                     LIMIT 1
@@ -1198,14 +1407,39 @@ app.get(
                 });
             }
 
+            const user =
+                rows[0];
+
             res.json({
                 success: true,
-                user:
-                    rows[0]
+
+                user: {
+                    id:
+                        user.id,
+
+                    username:
+                        user.username,
+
+                    email:
+                        user.email,
+
+                    avatarUrl:
+                        user.avatar_url ||
+                        "",
+
+                    premiumExpiresAt:
+                        user.premium_expires_at,
+
+                    createdAt:
+                        user.created_at,
+
+                    updatedAt:
+                        user.updated_at
+                }
             });
         } catch (error) {
             console.error(
-                "USER ERROR:",
+                "USER PROFILE ERROR:",
                 error
             );
 
@@ -1221,7 +1455,367 @@ app.get(
 );
 
 /* =========================================================
-   PREMIUM PLANS
+UPDATE PROFILE
+========================================================= */
+
+app.put(
+    "/api/auth/user/:id",
+    async (req, res) => {
+        try {
+            const userId =
+                Number(
+                    req.params.id
+                );
+
+            if (
+                !isValidId(userId)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "شناسه کاربر نامعتبر است."
+                });
+            }
+
+            const {
+                username,
+                email
+            } = req.body;
+
+            const cleanUsername =
+                normalizeUsername(
+                    username
+                );
+
+            const cleanEmail =
+                normalizeEmail(
+                    email
+                );
+
+            if (
+                !cleanUsername ||
+                !cleanEmail
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "نام کاربری و ایمیل الزامی است."
+                });
+            }
+
+            const [duplicate] =
+                await pool.query(
+                    `
+                    SELECT id
+                    FROM users
+                    WHERE
+                        (username = ? OR email = ?)
+                        AND id <> ?
+                    LIMIT 1
+                    `,
+                    [
+                        cleanUsername,
+                        cleanEmail,
+                        userId
+                    ]
+                );
+
+            if (
+                duplicate.length > 0
+            ) {
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        "نام کاربری یا ایمیل قبلاً استفاده شده است."
+                });
+            }
+
+            const [result] =
+                await pool.query(
+                    `
+                    UPDATE users
+                    SET
+                        username = ?,
+                        email = ?,
+                        updated_at = NOW()
+                    WHERE id = ?
+                    `,
+                    [
+                        cleanUsername,
+                        cleanEmail,
+                        userId
+                    ]
+                );
+
+            if (
+                result.affectedRows === 0
+            ) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "کاربر پیدا نشد."
+                });
+            }
+
+            const [rows] =
+                await pool.query(
+                    `
+                    SELECT
+                        id,
+                        username,
+                        email,
+                        avatar_url,
+                        premium_expires_at
+                    FROM users
+                    WHERE id = ?
+                    LIMIT 1
+                    `,
+                    [userId]
+                );
+
+            const user =
+                rows[0];
+
+            res.json({
+                success: true,
+                message:
+                    "پروفایل بروزرسانی شد.",
+
+                user: {
+                    id:
+                        user.id,
+
+                    username:
+                        user.username,
+
+                    email:
+                        user.email,
+
+                    avatarUrl:
+                        user.avatar_url ||
+                        "",
+
+                    premiumExpiresAt:
+                        user.premium_expires_at
+                }
+            });
+        } catch (error) {
+            console.error(
+                "UPDATE PROFILE ERROR:",
+                error
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "خطا در بروزرسانی پروفایل.",
+                error:
+                    error.message
+            });
+        }
+    }
+);
+
+/* =========================================================
+UPLOAD / CHANGE AVATAR
+========================================================= */
+
+app.put(
+    "/api/auth/user/:id/avatar",
+    async (req, res) => {
+        try {
+            const userId =
+                Number(
+                    req.params.id
+                );
+
+            if (
+                !isValidId(userId)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "شناسه کاربر نامعتبر است."
+                });
+            }
+
+            const avatar =
+                cleanAvatarUrl(
+                    req.body.avatar
+                );
+
+            if (!avatar) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "عکس پروفایل ارسال نشده است."
+                });
+            }
+
+            if (
+                !isValidAvatar(avatar)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "فرمت عکس پروفایل معتبر نیست. فقط JPG، PNG و WEBP مجاز است."
+                });
+            }
+
+            /*
+             * Maximum decoded Base64 image size:
+             * 5 MB
+             */
+
+            const avatarBytes =
+                avatarSizeInBytes(
+                    avatar
+                );
+
+            if (
+                avatarBytes >
+                5 * 1024 * 1024
+            ) {
+                return res.status(413).json({
+                    success: false,
+                    message:
+                        "حجم عکس نباید بیشتر از ۵ مگابایت باشد."
+                });
+            }
+
+            const [users] =
+                await pool.query(
+                    `
+                    SELECT id
+                    FROM users
+                    WHERE id = ?
+                    LIMIT 1
+                    `,
+                    [userId]
+                );
+
+            if (
+                users.length === 0
+            ) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "کاربر پیدا نشد."
+                });
+            }
+
+            await pool.query(
+                `
+                UPDATE users
+                SET
+                    avatar_url = ?,
+                    updated_at = NOW()
+                WHERE id = ?
+                `,
+                [
+                    avatar,
+                    userId
+                ]
+            );
+
+            res.json({
+                success: true,
+                message:
+                    "عکس پروفایل با موفقیت ذخیره شد.",
+                userId:
+                    userId,
+                avatarUrl:
+                    avatar
+            });
+        } catch (error) {
+            console.error(
+                "AVATAR UPDATE ERROR:",
+                error
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "خطا در ذخیره عکس پروفایل.",
+                error:
+                    error.message
+            });
+        }
+    }
+);
+
+/* =========================================================
+DELETE AVATAR
+========================================================= */
+
+app.delete(
+    "/api/auth/user/:id/avatar",
+    async (req, res) => {
+        try {
+            const userId =
+                Number(
+                    req.params.id
+                );
+
+            if (
+                !isValidId(userId)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "شناسه کاربر نامعتبر است."
+                });
+            }
+
+            const [result] =
+                await pool.query(
+                    `
+                    UPDATE users
+                    SET
+                        avatar_url = NULL,
+                        updated_at = NOW()
+                    WHERE id = ?
+                    `,
+                    [userId]
+                );
+
+            if (
+                result.affectedRows === 0
+            ) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "کاربر پیدا نشد."
+                });
+            }
+
+            res.json({
+                success: true,
+                message:
+                    "عکس پروفایل حذف شد.",
+                userId,
+                avatarUrl:
+                    ""
+            });
+        } catch (error) {
+            console.error(
+                "DELETE AVATAR ERROR:",
+                error
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "خطا در حذف عکس پروفایل.",
+                error:
+                    error.message
+            });
+        }
+    }
+);
+
+/* =========================================================
+PREMIUM PLANS
 ========================================================= */
 
 app.get(
@@ -1236,7 +1830,7 @@ app.get(
 );
 
 /* =========================================================
-   PREMIUM STATUS
+PREMIUM STATUS
 ========================================================= */
 
 app.get(
@@ -1315,7 +1909,7 @@ app.get(
 );
 
 /* =========================================================
-   CREATE PAYMENT ORDER
+CREATE PAYMENT ORDER
 ========================================================= */
 
 app.post(
@@ -1373,9 +1967,7 @@ app.post(
                     WHERE id = ?
                     LIMIT 1
                     `,
-                    [
-                        numericUserId
-                    ]
+                    [numericUserId]
                 );
 
             if (
@@ -1403,7 +1995,8 @@ app.post(
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, 'CREATED', NOW(), NOW())
+                VALUES
+                (?, ?, ?, ?, 'CREATED', NOW(), NOW())
                 `,
                 [
                     orderId,
@@ -1444,24 +2037,20 @@ app.post(
                 error:
                     error.message,
                 code:
-                    error.code ||
-                    null,
+                    error.code || null,
                 errno:
-                    error.errno ||
-                    null,
+                    error.errno || null,
                 sqlState:
-                    error.sqlState ||
-                    null,
+                    error.sqlState || null,
                 sqlMessage:
-                    error.sqlMessage ||
-                    null
+                    error.sqlMessage || null
             });
         }
     }
 );
 
 /* =========================================================
-   ORDER STATUS
+ORDER STATUS
 ========================================================= */
 
 app.get(
@@ -1527,7 +2116,7 @@ app.get(
 );
 
 /* =========================================================
-   CANCEL PAYMENT
+CANCEL PAYMENT
 ========================================================= */
 
 app.post(
@@ -1592,7 +2181,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN LOGIN
+ADMIN LOGIN
 ========================================================= */
 
 app.post(
@@ -1675,7 +2264,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN STATS
+ADMIN STATS
 ========================================================= */
 
 app.get(
@@ -1740,37 +2329,45 @@ app.get(
                     `
                     SELECT COUNT(*) AS count
                     FROM orders
-                    WHERE status IN ('PAID', 'APPROVED')
+                    WHERE status IN
+                    ('PAID', 'APPROVED')
                     `
                 );
 
             res.json({
                 success: true,
+
                 stats: {
                     users:
                         Number(
                             userCount.count
                         ),
+
                     premium:
                         Number(
                             premiumCount.count
                         ),
+
                     movies:
                         Number(
                             movieCount.count
                         ),
+
                     exploreVideos:
                         Number(
                             exploreCount.count
                         ),
+
                     orders:
                         Number(
                             orderCount.count
                         ),
+
                     pendingOrders:
                         Number(
                             pendingOrders.count
                         ),
+
                     approvedOrders:
                         Number(
                             paidOrders.count
@@ -1795,7 +2392,7 @@ app.get(
 );
 
 /* =========================================================
-   ADMIN USERS LIST
+ADMIN USERS LIST
 ========================================================= */
 
 app.get(
@@ -1806,7 +2403,7 @@ app.get(
             const search =
                 String(
                     req.query.search ||
-                        ""
+                    ""
                 ).trim();
 
             let query = `
@@ -1814,6 +2411,7 @@ app.get(
                     id,
                     username,
                     email,
+                    avatar_url,
                     premium_expires_at,
                     created_at,
                     updated_at
@@ -1848,6 +2446,11 @@ app.get(
                 rows.map(
                     user => ({
                         ...user,
+
+                        avatarUrl:
+                            user.avatar_url ||
+                            "",
+
                         premiumActive:
                             isPremiumDateActive(
                                 user.premium_expires_at
@@ -1879,7 +2482,7 @@ app.get(
 );
 
 /* =========================================================
-   ADMIN USER DETAILS
+ADMIN USER DETAILS
 ========================================================= */
 
 app.get(
@@ -1909,6 +2512,7 @@ app.get(
                         id,
                         username,
                         email,
+                        avatar_url,
                         premium_expires_at,
                         created_at,
                         updated_at
@@ -1934,8 +2538,14 @@ app.get(
 
             res.json({
                 success: true,
+
                 user: {
                     ...user,
+
+                    avatarUrl:
+                        user.avatar_url ||
+                        "",
+
                     premiumActive:
                         isPremiumDateActive(
                             user.premium_expires_at
@@ -1960,7 +2570,7 @@ app.get(
 );
 
 /* =========================================================
-   ADMIN CREATE USER
+ADMIN CREATE USER
 ========================================================= */
 
 app.post(
@@ -2043,11 +2653,13 @@ app.post(
                         username,
                         email,
                         password_hash,
+                        avatar_url,
                         premium_expires_at,
                         created_at,
                         updated_at
                     )
-                    VALUES (?, ?, ?, NULL, NOW(), NOW())
+                    VALUES
+                    (?, ?, ?, NULL, NULL, NOW(), NOW())
                     `,
                     [
                         cleanUsername,
@@ -2083,7 +2695,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN UPDATE USER
+ADMIN UPDATE USER
 ========================================================= */
 
 app.put(
@@ -2137,8 +2749,9 @@ app.put(
                     `
                     SELECT id
                     FROM users
-                    WHERE (username = ? OR email = ?)
-                      AND id <> ?
+                    WHERE
+                        (username = ? OR email = ?)
+                        AND id <> ?
                     LIMIT 1
                     `,
                     [
@@ -2208,7 +2821,7 @@ app.put(
 );
 
 /* =========================================================
-   ADMIN DELETE USER
+ADMIN DELETE USER
 ========================================================= */
 
 app.delete(
@@ -2273,7 +2886,7 @@ app.delete(
 );
 
 /* =========================================================
-   ADMIN ACTIVATE PREMIUM
+ADMIN ACTIVATE PREMIUM
 ========================================================= */
 
 app.post(
@@ -2405,7 +3018,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN EXTEND PREMIUM
+ADMIN EXTEND PREMIUM
 ========================================================= */
 
 app.post(
@@ -2536,7 +3149,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN CANCEL PREMIUM
+ADMIN CANCEL PREMIUM
 ========================================================= */
 
 app.post(
@@ -2604,7 +3217,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN ORDERS / PREMIUM REQUESTS
+ADMIN ORDERS
 ========================================================= */
 
 app.get(
@@ -2615,7 +3228,7 @@ app.get(
             const status =
                 String(
                     req.query.status ||
-                        ""
+                    ""
                 ).trim();
 
             let query = `
@@ -2687,7 +3300,7 @@ app.get(
 );
 
 /* =========================================================
-   ADMIN APPROVE ORDER
+ADMIN APPROVE ORDER
 ========================================================= */
 
 app.post(
@@ -2882,7 +3495,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN REJECT ORDER
+ADMIN REJECT ORDER
 ========================================================= */
 
 app.post(
@@ -2941,7 +3554,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN MOVIES LIST
+ADMIN MOVIES LIST
 ========================================================= */
 
 app.get(
@@ -2952,7 +3565,7 @@ app.get(
             const search =
                 String(
                     req.query.search ||
-                        ""
+                    ""
                 ).trim();
 
             let query = `
@@ -3019,7 +3632,7 @@ app.get(
 );
 
 /* =========================================================
-   ADMIN CREATE MOVIE
+ADMIN CREATE MOVIE
 ========================================================= */
 
 app.post(
@@ -3065,25 +3678,32 @@ app.post(
                         created_at,
                         updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                    VALUES
+                    (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                     `,
                     [
                         cleanTitle,
+
                         String(
                             genre || ""
                         ).trim(),
+
                         year
                             ? Number(year)
                             : null,
+
                         String(
                             description || ""
                         ).trim(),
+
                         parseBoolean(
                             premium
                         ),
+
                         String(
                             posterUrl || ""
                         ).trim(),
+
                         String(
                             videoUrl || ""
                         ).trim()
@@ -3115,7 +3735,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN UPDATE MOVIE
+ADMIN UPDATE MOVIE
 ========================================================= */
 
 app.put(
@@ -3178,24 +3798,31 @@ app.put(
                     `,
                     [
                         cleanTitle,
+
                         String(
                             genre || ""
                         ).trim(),
+
                         year
                             ? Number(year)
                             : null,
+
                         String(
                             description || ""
                         ).trim(),
+
                         parseBoolean(
                             premium
                         ),
+
                         String(
                             posterUrl || ""
                         ).trim(),
+
                         String(
                             videoUrl || ""
                         ).trim(),
+
                         movieId
                     ]
                 );
@@ -3233,7 +3860,7 @@ app.put(
 );
 
 /* =========================================================
-   ADMIN DELETE MOVIE
+ADMIN DELETE MOVIE
 ========================================================= */
 
 app.delete(
@@ -3298,7 +3925,7 @@ app.delete(
 );
 
 /* =========================================================
-   ADMIN EXPLORE VIDEOS LIST
+ADMIN EXPLORE VIDEOS LIST
 ========================================================= */
 
 app.get(
@@ -3309,7 +3936,7 @@ app.get(
             const search =
                 String(
                     req.query.search ||
-                        ""
+                    ""
                 ).trim();
 
             let query = `
@@ -3378,7 +4005,7 @@ app.get(
 );
 
 /* =========================================================
-   ADMIN CREATE EXPLORE VIDEO
+ADMIN CREATE EXPLORE VIDEO
 ========================================================= */
 
 app.post(
@@ -3448,21 +4075,25 @@ app.post(
                         created_at,
                         updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                    VALUES
+                    (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                     `,
                     [
                         cleanTitle,
                         cleanDescription,
                         cleanVideoUrl,
                         cleanThumbnailUrl,
+
                         parseBoolean(
                             premium
                         ),
+
                         active === undefined
                             ? true
                             : parseBoolean(
                                   active
                               ),
+
                         finalSortOrder
                     ]
                 );
@@ -3492,7 +4123,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN UPDATE EXPLORE VIDEO
+ADMIN UPDATE EXPLORE VIDEO
 ========================================================= */
 
 app.put(
@@ -3582,14 +4213,17 @@ app.put(
                         cleanDescription,
                         cleanVideoUrl,
                         cleanThumbnailUrl,
+
                         parseBoolean(
                             premium
                         ),
+
                         active === undefined
                             ? true
                             : parseBoolean(
                                   active
                               ),
+
                         finalSortOrder,
                         videoId
                     ]
@@ -3628,7 +4262,7 @@ app.put(
 );
 
 /* =========================================================
-   ADMIN DELETE EXPLORE VIDEO
+ADMIN DELETE EXPLORE VIDEO
 ========================================================= */
 
 app.delete(
@@ -3693,7 +4327,7 @@ app.delete(
 );
 
 /* =========================================================
-   PUBLIC MOVIES
+PUBLIC MOVIES
 ========================================================= */
 
 app.get(
@@ -3744,7 +4378,7 @@ app.get(
 );
 
 /* =========================================================
-   PUBLIC EXPLORE VIDEOS
+PUBLIC EXPLORE VIDEOS
 ========================================================= */
 
 app.get(
@@ -3853,10 +4487,13 @@ app.get(
                         return {
                             id:
                                 video.id,
+
                             title:
                                 video.title,
+
                             description:
                                 video.description,
+
                             videoUrl:
                                 allowed
                                     ? (
@@ -3864,24 +4501,31 @@ app.get(
                                           ""
                                       )
                                     : "",
+
                             thumbnailUrl:
                                 video.thumbnail_url ||
                                 "",
+
                             premium:
                                 isPremium,
+
                             active:
                                 Boolean(
                                     video.active
                                 ),
+
                             sortOrder:
                                 Number(
                                     video.sort_order ||
                                         0
                                 ),
+
                             createdAt:
                                 video.created_at,
+
                             updatedAt:
                                 video.updated_at,
+
                             locked:
                                 !allowed
                         };
@@ -3890,13 +4534,17 @@ app.get(
 
             res.json({
                 success: true,
+
                 userId,
+
                 premiumActive:
                     Boolean(
                         premiumActive
                     ),
+
                 count:
                     videos.length,
+
                 videos
             });
         } catch (error) {
@@ -3917,7 +4565,7 @@ app.get(
 );
 
 /* =========================================================
-   PUBLIC COMMENTS - GET
+PUBLIC COMMENTS - GET
 ========================================================= */
 
 app.get(
@@ -3970,7 +4618,8 @@ app.get(
                         c.user_id,
                         c.comment_text,
                         c.created_at,
-                        u.username
+                        u.username,
+                        u.avatar_url
                     FROM comments c
                     LEFT JOIN users u
                         ON u.id = c.user_id
@@ -3987,15 +4636,42 @@ app.get(
                     comment => ({
                         id:
                             comment.id,
+
                         videoId:
                             comment.video_id,
+
                         userId:
                             comment.user_id,
+
                         username:
                             comment.username ||
                             "کاربر",
+
+                        avatarUrl:
+                            comment.avatar_url ||
+                            "",
+
+                        /*
+                         * Nested user object
+                         * for easier Android usage.
+                         */
+
+                        user: {
+                            id:
+                                comment.user_id,
+
+                            username:
+                                comment.username ||
+                                "کاربر",
+
+                            avatarUrl:
+                                comment.avatar_url ||
+                                ""
+                        },
+
                         text:
                             comment.comment_text,
+
                         createdAt:
                             comment.created_at
                     })
@@ -4025,7 +4701,7 @@ app.get(
 );
 
 /* =========================================================
-   PUBLIC COMMENTS - POST
+PUBLIC COMMENTS - POST
 ========================================================= */
 
 app.post(
@@ -4044,8 +4720,7 @@ app.post(
 
             const text =
                 String(
-                    req.body.text ||
-                    ""
+                    req.body.text || ""
                 ).trim();
 
             if (
@@ -4076,7 +4751,9 @@ app.post(
                 });
             }
 
-            if (text.length > 1000) {
+            if (
+                text.length > 1000
+            ) {
                 return res.status(400).json({
                     success: false,
                     message:
@@ -4089,7 +4766,8 @@ app.post(
                     `
                     SELECT
                         id,
-                        username
+                        username,
+                        avatar_url
                     FROM users
                     WHERE id = ?
                     LIMIT 1
@@ -4140,7 +4818,8 @@ app.post(
                         created_at,
                         updated_at
                     )
-                    VALUES (?, ?, ?, NOW(), NOW())
+                    VALUES
+                    (?, ?, ?, NOW(), NOW())
                     `,
                     [
                         videoId,
@@ -4158,14 +4837,17 @@ app.post(
                         c.user_id,
                         c.comment_text,
                         c.created_at,
-                        u.username
+                        u.username,
+                        u.avatar_url
                     FROM comments c
                     LEFT JOIN users u
                         ON u.id = c.user_id
                     WHERE c.id = ?
                     LIMIT 1
                     `,
-                    [result.insertId]
+                    [
+                        result.insertId
+                    ]
                 );
 
             const comment =
@@ -4173,41 +4855,84 @@ app.post(
                     ? rows[0]
                     : null;
 
+            const username =
+                comment
+                    ?.username ||
+                users[0]
+                    .username ||
+                "کاربر";
+
+            const avatarUrl =
+                comment
+                    ?.avatar_url ||
+                users[0]
+                    .avatar_url ||
+                "";
+
             res.json({
                 success: true,
+
                 message:
                     "نظر با موفقیت ثبت شد.",
+
                 comment:
                     comment
                         ? {
                               id:
                                   comment.id,
+
                               videoId:
                                   comment.video_id,
+
                               userId:
                                   comment.user_id,
-                              username:
-                                  comment.username ||
-                                  users[0].username ||
-                                  "کاربر",
+
+                              username,
+
+                              avatarUrl,
+
+                              user: {
+                                  id:
+                                      comment.user_id,
+
+                                  username,
+
+                                  avatarUrl
+                              },
+
                               text:
                                   comment.comment_text,
+
                               createdAt:
                                   comment.created_at
                           }
                         : {
                               id:
                                   result.insertId,
+
                               videoId,
+
                               userId,
-                              username:
-                                  users[0].username ||
-                                  "کاربر",
+
+                              username,
+
+                              avatarUrl,
+
+                              user: {
+                                  id:
+                                      userId,
+
+                                  username,
+
+                                  avatarUrl
+                              },
+
                               text,
+
                               createdAt:
                                   new Date()
                           }
-            });
+                });
         } catch (error) {
             console.error(
                 "POST COMMENT ERROR:",
@@ -4226,7 +4951,7 @@ app.post(
 );
 
 /* =========================================================
-   ROOT
+ROOT
 ========================================================= */
 
 app.get(
@@ -4239,7 +4964,7 @@ app.get(
 );
 
 /* =========================================================
-   404
+404
 ========================================================= */
 
 app.use(
@@ -4253,11 +4978,16 @@ app.use(
 );
 
 /* =========================================================
-   GLOBAL ERROR
+GLOBAL ERROR
 ========================================================= */
 
 app.use(
-    (error, req, res, next) => {
+    (
+        error,
+        req,
+        res,
+        next
+    ) => {
         console.error(
             "GLOBAL ERROR:",
             error
@@ -4274,7 +5004,7 @@ app.use(
 );
 
 /* =========================================================
-   START SERVER
+START SERVER
 ========================================================= */
 
 async function startServer() {

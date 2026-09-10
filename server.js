@@ -795,6 +795,67 @@ async function ensureExploreVideosTable() {
 }
 
 /* =========================================================
+   COMMENTS TABLE
+========================================================= */
+
+async function ensureCommentsTable() {
+    console.log(
+        "Checking comments table..."
+    );
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS comments (
+            id INT NOT NULL AUTO_INCREMENT,
+            video_id INT NOT NULL,
+            user_id INT NULL,
+            comment_text TEXT NOT NULL,
+            created_at DATETIME NULL
+                DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NULL
+                DEFAULT CURRENT_TIMESTAMP
+                ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            INDEX idx_comments_video_id (video_id),
+            INDEX idx_comments_user_id (user_id)
+        )
+    `);
+
+    await ensureColumn(
+        "comments",
+        "video_id",
+        "INT NOT NULL"
+    );
+
+    await ensureColumn(
+        "comments",
+        "user_id",
+        "INT NULL"
+    );
+
+    await ensureColumn(
+        "comments",
+        "comment_text",
+        "TEXT NOT NULL"
+    );
+
+    await ensureColumn(
+        "comments",
+        "created_at",
+        "DATETIME NULL DEFAULT CURRENT_TIMESTAMP"
+    );
+
+    await ensureColumn(
+        "comments",
+        "updated_at",
+        "DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+    );
+
+    console.log(
+        "Comments table is ready."
+    );
+}
+
+/* =========================================================
    DATABASE INITIALIZATION
 ========================================================= */
 
@@ -807,6 +868,7 @@ async function initializeDatabase() {
     await ensureOrdersTable();
     await ensureMoviesTable();
     await ensureExploreVideosTable();
+    await ensureCommentsTable();
 
     console.log(
         "Database initialization completed."
@@ -3683,19 +3745,6 @@ app.get(
 
 /* =========================================================
    PUBLIC EXPLORE VIDEOS
-=========================================================
-
-   بدون userId:
-   فقط ویدئوهای رایگان
-
-   با userId معتبر:
-   وضعیت Premium همان کاربر از users خوانده می‌شود.
-
-   کاربر Free:
-   ویدئوهای رایگان + ویدئوهای Premium بدون videoUrl
-
-   کاربر Premium:
-   همه ویدئوها با videoUrl
 ========================================================= */
 
 app.get(
@@ -3860,6 +3909,315 @@ app.get(
                 success: false,
                 message:
                     "خطا در دریافت ویدئوهای Explore.",
+                error:
+                    error.message
+            });
+        }
+    }
+);
+
+/* =========================================================
+   PUBLIC COMMENTS - GET
+========================================================= */
+
+app.get(
+    "/api/explore/videos/:videoId/comments",
+    async (req, res) => {
+        try {
+            const videoId =
+                Number(
+                    req.params.videoId
+                );
+
+            if (
+                !isValidId(videoId)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "شناسه ویدئو نامعتبر است."
+                });
+            }
+
+            const [videos] =
+                await pool.query(
+                    `
+                    SELECT id
+                    FROM explore_videos
+                    WHERE id = ?
+                      AND active = TRUE
+                    LIMIT 1
+                    `,
+                    [videoId]
+                );
+
+            if (
+                videos.length === 0
+            ) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "ویدئو پیدا نشد."
+                });
+            }
+
+            const [rows] =
+                await pool.query(
+                    `
+                    SELECT
+                        c.id,
+                        c.video_id,
+                        c.user_id,
+                        c.comment_text,
+                        c.created_at,
+                        u.username
+                    FROM comments c
+                    LEFT JOIN users u
+                        ON u.id = c.user_id
+                    WHERE c.video_id = ?
+                    ORDER BY
+                        c.created_at ASC,
+                        c.id ASC
+                    `,
+                    [videoId]
+                );
+
+            const comments =
+                rows.map(
+                    comment => ({
+                        id:
+                            comment.id,
+                        videoId:
+                            comment.video_id,
+                        userId:
+                            comment.user_id,
+                        username:
+                            comment.username ||
+                            "کاربر",
+                        text:
+                            comment.comment_text,
+                        createdAt:
+                            comment.created_at
+                    })
+                );
+
+            res.json({
+                success: true,
+                count:
+                    comments.length,
+                comments
+            });
+        } catch (error) {
+            console.error(
+                "GET COMMENTS ERROR:",
+                error
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "خطا در دریافت نظرات.",
+                error:
+                    error.message
+            });
+        }
+    }
+);
+
+/* =========================================================
+   PUBLIC COMMENTS - POST
+========================================================= */
+
+app.post(
+    "/api/explore/videos/:videoId/comments",
+    async (req, res) => {
+        try {
+            const videoId =
+                Number(
+                    req.params.videoId
+                );
+
+            const userId =
+                Number(
+                    req.body.userId
+                );
+
+            const text =
+                String(
+                    req.body.text ||
+                    ""
+                ).trim();
+
+            if (
+                !isValidId(videoId)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "شناسه ویدئو نامعتبر است."
+                });
+            }
+
+            if (
+                !isValidId(userId)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "شناسه کاربر نامعتبر است."
+                });
+            }
+
+            if (!text) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "متن نظر نمی‌تواند خالی باشد."
+                });
+            }
+
+            if (text.length > 1000) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "متن نظر حداکثر باید ۱۰۰۰ کاراکتر باشد."
+                });
+            }
+
+            const [users] =
+                await pool.query(
+                    `
+                    SELECT
+                        id,
+                        username
+                    FROM users
+                    WHERE id = ?
+                    LIMIT 1
+                    `,
+                    [userId]
+                );
+
+            if (
+                users.length === 0
+            ) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "کاربر پیدا نشد."
+                });
+            }
+
+            const [videos] =
+                await pool.query(
+                    `
+                    SELECT id
+                    FROM explore_videos
+                    WHERE id = ?
+                      AND active = TRUE
+                    LIMIT 1
+                    `,
+                    [videoId]
+                );
+
+            if (
+                videos.length === 0
+            ) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "ویدئو پیدا نشد."
+                });
+            }
+
+            const [result] =
+                await pool.query(
+                    `
+                    INSERT INTO comments
+                    (
+                        video_id,
+                        user_id,
+                        comment_text,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, NOW(), NOW())
+                    `,
+                    [
+                        videoId,
+                        userId,
+                        text
+                    ]
+                );
+
+            const [rows] =
+                await pool.query(
+                    `
+                    SELECT
+                        c.id,
+                        c.video_id,
+                        c.user_id,
+                        c.comment_text,
+                        c.created_at,
+                        u.username
+                    FROM comments c
+                    LEFT JOIN users u
+                        ON u.id = c.user_id
+                    WHERE c.id = ?
+                    LIMIT 1
+                    `,
+                    [result.insertId]
+                );
+
+            const comment =
+                rows.length > 0
+                    ? rows[0]
+                    : null;
+
+            res.json({
+                success: true,
+                message:
+                    "نظر با موفقیت ثبت شد.",
+                comment:
+                    comment
+                        ? {
+                              id:
+                                  comment.id,
+                              videoId:
+                                  comment.video_id,
+                              userId:
+                                  comment.user_id,
+                              username:
+                                  comment.username ||
+                                  users[0].username ||
+                                  "کاربر",
+                              text:
+                                  comment.comment_text,
+                              createdAt:
+                                  comment.created_at
+                          }
+                        : {
+                              id:
+                                  result.insertId,
+                              videoId,
+                              userId,
+                              username:
+                                  users[0].username ||
+                                  "کاربر",
+                              text,
+                              createdAt:
+                                  new Date()
+                          }
+            });
+        } catch (error) {
+            console.error(
+                "POST COMMENT ERROR:",
+                error
+            );
+
+            res.status(500).json({
+                success: false,
+                message:
+                    "خطا در ثبت نظر.",
                 error:
                     error.message
             });
